@@ -4,6 +4,257 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-08-24
+
+The release that makes the package usable **anywhere**: the EU-27, the UK,
+Switzerland and the US, in **both** EN 16931 syntaxes, reading as well as
+writing, with tax identifiers that are verified rather than pattern-matched and
+VAT rates that know what they apply to.
+
+### Added
+
+- **`inspect_p12()` + `SigningCertificate`** — read a signing certificate
+  without signing anything: subject, issuer, serial, validity, and the
+  questions that matter (`is_expired()`, `days_until_expiry()`,
+  `expires_within(30)`). An expired certificate opens fine, signs fine, and
+  the result is refused downstream, so the answer belongs at configuration
+  time. Both embedding products were reaching into the private `_load_p12`
+  for a worse version of this.
+- **`SigningUnavailable`** — a dedicated error for "the `[signing]` extra is
+  not installed", distinct from "this archive is broken". Collapsing the two
+  into one `except Exception` is how a corrupt P12 gets stored as valid; that
+  is exactly what both products were doing. It also inherits `RuntimeError`,
+  which is what this module raised before, so existing handlers keep working.
+- **`einvoice.reference`** — JSON-safe views of the reference data
+  (`country_reference`, `all_country_references`, `product_categories`,
+  `reference_metadata`) for platforms that expose fiscal setup in a UI. No
+  `Decimal`, no `date`, and deliberately **no float**: rates travel as strings.
+  Unlike `profile_for()`, which is permissive so rendering never stops,
+  `country_reference()` raises on an unsupported country — a setup screen is
+  *asking* what the rules are, and a generic profile presented as Portugal's is
+  a wrong answer wearing the right flag.
+- **Local tax-identifier labels for every country.** 26 of the 30 profiles
+  said just `"VAT"`, which is not a label so much as the absence of one: a
+  German operator should not have to work out that the field marked "VAT" is
+  where the USt-IdNr. goes. Now `NIP`, `DIČ`, `Btw-nummer`, `ΑΦΜ`, `Adószám`,
+  `CUI / CIF` and the rest — the vocabulary each country actually prints on
+  its own paperwork.
+
+- **Switzerland.** A real `CH` profile replaces the permissive generic fallback
+  that accepted any string as a Swiss VAT number: CHE/UID **check-digit
+  validation**, Peppol **EAS 0183** routing, CHF, the 8.1 / 3.8 / 2.6 rate set,
+  and B2G/eBill/QR-bill guidance. Swiss sellers are also barred from Italian
+  `Natura` codes, which describe a VAT regime Switzerland does not have.
+- **CII renderer** (`cii`, aliases `facturx` / `zugferd`) — UN/CEFACT Cross
+  Industry Invoice, the *other* EN 16931 syntax. This is what France's reform
+  and German ZUGFeRD actually exchange, and a receiver takes one syntax or the
+  other, so UBL alone could not serve them. Named Factur-X profiles
+  (`minimum` … `extended`, plus XRechnung-over-CII) via `FACTURX_PROFILES`.
+- **Check-digit tax-id validation** (`einvoice.taxid`) for **20 countries** —
+  AT, BE, CH, DE, DK, EE, FI, FR, GB, GR, HR, HU, IE, IT, LU, PL, PT, SE, SI,
+  SK. Printed forms normalize (`"CHE-116.281.710 MWST"`, `"FR 40 303 265 045"`).
+  Countries without a stable public algorithm stay structural and *say so* via
+  `CountryProfile.tax_id_validation` — claiming a check we do not perform would
+  be worse than not performing it.
+- **E-invoicing regime data** per country (`EInvoicingRegime`): network
+  (SdI / Chorus / KSeF / e-Factura / Peppol / myDATA / RTIR), B2G and B2B
+  status, and — the important one — `national_format`, which flags the
+  countries whose mandate needs a syntax this package does **not** emit
+  (Poland's FA(2), Spain's Facturae). Dated by `MANDATES_VERIFIED_AS_OF`.
+- **National CIUS selection**: `renderer_for_country(code, b2g=True)` picks
+  XRechnung (DE), NLCIUS (NL) or CIUS-RO (RO). Sending plain Peppol BIS where a
+  CIUS is expected is a rejection, not a warning.
+- **`Invoice.check()`** — non-fatal advisories, separate from `validate()`:
+  implausible VAT rate for the country, intra-EU supply carrying domestic VAT,
+  export carrying VAT, missing buyer VAT id, due date before issue date,
+  unusual currency. Warnings must not block legitimate invoices, so these never
+  raise and never fail a render.
+- **Known VAT rates** per country, feeding the advisory above.
+- **25 platform presets** (`einvoice.transport.providers`) — **Fiscozen**,
+  Aruba, FattureInCloud, Zucchetti, InfoCert, Notartel, Wolters Kluwer, Agyo,
+  Namirial, OpenAPI.it, Storecove, Pagero, Basware, Tradeshift, Unifiedpost,
+  ecosio, B2Brouter, EDICOM, Sovos, Avalara, Chorus Pro, KSeF, e-Factura ANAF,
+  FACe, eBill. Each states its transport, its renderer, the credentials it
+  needs, and whether its endpoints are `endpoints_verified` — a preset that
+  looked integrated but had never been called would be worse than none.
+- `FattureInCloudXmlTransport` — uploads a pre-rendered FatturaPA instead of
+  letting FIC re-derive one from a simplified payload (which silently drops
+  line discounts, bollo, cassa and linked-document references).
+- CLI: `check`, `providers`, and a much richer `countries` (regime, rates,
+  validation strength, staleness date).
+- `naming.safe_filename`, `Party.normalized_vat()`, `Party.postal_address`.
+- **Inbound parsing** (`einvoice.parsing`) — `parse_invoice()` autodetects the
+  format from the root element and returns a neutral `Invoice`, with dedicated
+  `parse_ubl_xml` / `parse_cii_xml` / `parse_fattura_xml`. This was the missing
+  half of every integration, and increasingly the mandatory half: Germany has
+  required businesses to *accept* structured e-invoices since 2025-01-01 and
+  France requires it of everyone from 2026 — you cannot be compliant by sending
+  alone.
+- **Totals are recomputed, never believed.** A parsed invoice derives its money
+  from the lines exactly as an outgoing one does.
+  `compare_declared_totals()` puts the supplier's stated total beside the one
+  their own lines produce, so a discrepancy is visible instead of imported as
+  fact.
+- **40 more platform presets — 25 → 65**, filling markets that had none:
+  Germany (DATEV, SEEBURGER, SAP Business Network), the Nordics (Visma,
+  Maventa, Apix, InExchange, Tickstar, Logiq, OpusCapita, Nemhandel), Benelux
+  (Billit, Digipoort, Exact), France (Esker, Cegid, Docaposte, Iopole,
+  Pennylane, Generix), Iberia (Voxel, SERES, Saphety), Switzerland (Bexio,
+  Abacus, Conextrade), plus Comarch, Coupa, Tungsten, Fonoa, Vertex, SNI,
+  Qvalia, Galaxy Gateway, SmartBill and four more Italian intermediaries.
+- **The registry is now navigable**: every preset declares a `kind`
+  (`access_point`, `sdi_intermediary`, `national_portal`,
+  `accounting_platform`, `compliance_suite`), the `countries` it serves — as a
+  list, because a platform like B2Brouter covers several — and what it
+  `supports` (`send` / `status` / `receive`). `providers_of_kind()` and
+  `providers_for_country(..., kind=...)` filter on those.
+- CLI: `parse` (received XML → JSON), `inspect` (summarise an inbound document
+  and exit non-zero when its stated total contradicts its lines),
+  `providers --kind` / `--kinds`.
+- **The simplified document family**: `TD07` (fattura semplificata), `TD08`
+  (nota di credito semplificata) and `TD09` (nota di debito semplificata) were
+  missing from the code list entirely. `TD08` was the one that mattered — a
+  credit note the package did not know was one, and so would not have put on
+  UBL's `CreditNote` root.
+- `DocumentType.is_debit_note` and `.corrects_an_earlier_document`, so the two
+  kinds of correction can be told apart without matching on codes.
+- Two advisories for corrections: `correction_sign` (a credit or debit note
+  whose **total is negative** — the direction is carried by the document type,
+  and applying it to the amounts as well produces a credit note that asks the
+  customer to pay) and `correction_no_reference` (a correction with no
+  `DocumentReference(kind="invoice")`, which the receiver cannot match to
+  anything). Both are warnings: SdI accepts either, but neither works
+  downstream.
+- [`docs/CORRECTIONS.md`](docs/CORRECTIONS.md) — credit notes, debit notes and
+  the two legitimate shapes of a return.
+- **VAT rates by product category** (`einvoice.rates`). A country does not have
+  "a VAT rate" — which applies depends on what is sold, and knowing that 4%
+  exists is useless next to knowing a book goes there.
+  `rate_for("IT", ProductCategory.BOOKS)` answers the question people actually
+  have. `ProductCategory` follows Annex III of the VAT Directive; `RateKind`
+  distinguishes standard / reduced / super-reduced / parking / **zero** — and
+  zero-rated is not exempt, because it preserves the right to deduct input VAT.
+- **`FiscalRules` per country**: retention years, simplified-invoice threshold,
+  issuing deadline, domestic reverse charge, plus the EU-wide `EU_OSS_THRESHOLD`
+  (a *combined* turnover across member states, which is the part people get
+  wrong).
+- **`LineItem.category`** — optional, never rendered into any format, and used
+  only so `check()` can compare the rate you used against the one the country
+  applies to that kind of supply (`rate_category`).
+- CLI: `einvoice rates CC [--category …]` and `einvoice rules CC`.
+- [`docs/TAXES.md`](docs/TAXES.md).
+
+### Fixed
+
+- **UBL dropped six fields it was given.** Document references
+  (contract → `ContractDocumentReference`, DDT → `DespatchDocumentReference`,
+  invoice → `BillingReference`), attachments, line accounting periods, line
+  article codes and line exemption reasons were all accepted by the model and
+  silently discarded on render. Credit notes in particular had no
+  `BillingReference`, which EN 16931 BR-55 requires — the receiver could not
+  tell which invoice was being undone.
+- **Filenames containing the literal `"None"`.** A seller without a VAT number
+  produced `GBNone_00001-ubl.xml`; a Swiss number leaked its dots and dashes
+  into the name. UBL/CII now use a country-neutral `safe_filename`, and the
+  FatturaPA renderer refuses to compose a name it cannot form.
+- **Tax identifiers leaked their printed decoration into the XML** — spaces,
+  dots and the Swiss `MWST` suffix reached `CompanyID` and `EndpointID`, where
+  a receiver matches on the exact string.
+- **Double country prefixes**: a party stored as `"IT01234567891"` rendered as
+  `"ITIT01234567891"`, and Switzerland became `"CHCHE…"` because the UID
+  already carries its own `CHE`.
+- Shadowed loop variable in the FatturaPA renderer (`ln` bound to both an int
+  and a `LineItem`) that produced 13 spurious type errors and hid real ones.
+- The package is now **mypy-clean** (43 errors → 0) and CI enforces it rather
+  than treating it as advisory — `py.typed` means a type error here is a type
+  error in every downstream project.
+- **CII stamped a US tax id as a VAT registration.** `SpecifiedTaxRegistration`
+  carried `schemeID="VA"` regardless of jurisdiction, asserting a US seller was
+  registered for a tax the United States does not levy. Non-VAT schemes now use
+  `"FC"`, and the parser reads it back as the primary identifier — without
+  that, a US seller's EIN vanished on the return trip.
+- **The header-only Factur-X profiles emitted line items.** "BASIC WL" is
+  literally *Basic Without Lines*, and MINIMUM is smaller still; declaring
+  either while emitting lines produces a document that claims a profile it does
+  not satisfy, which a validating receiver rejects. Both are now header-only,
+  with the totals still describing the whole invoice.
+- **A French VAT key of `FR` was eaten as a country prefix.** France is the only
+  country whose bare number can begin with its own ISO code — the 2-character
+  key is drawn from `[0-9A-HJ-NP-Z]`, which includes both letters — so
+  `FR123456789` lost its key and was rejected as too short.
+- **The generic country profile claimed EUR**, so an ordinary USD invoice from
+  an unprofiled country raised a spurious currency advisory.
+- Dead `currency` parameter on the UBL party renderer.
+- **A price quoted per N units was multiplied by N.** Both syntaxes express
+  wholesale pricing by pairing the amount with a base quantity
+  (`cbc:BaseQuantity` / `ram:BasisQuantity`), and the parser read the amount
+  while ignoring the base — "50.00 per 10" with a quantity of 10 came back as
+  500.00. A tenfold error on a perfectly valid supplier document.
+- **Unit prices were rendered with two decimals**, so a price of `0.123456`
+  was written as `0.12` next to a line total computed from the full value. The
+  result was not merely lossy but *internally inconsistent*: EN 16931 requires
+  the line net amount to equal quantity × price, and a receiver recomputing it
+  got a different answer. Prices now carry up to six decimals (as FatturaPA
+  always did), trimmed to two when that is all they need.
+- **FatturaPA was not the lossless format it claimed to be.** The renderer
+  emitted ritenuta, cassa previdenziale, document discounts, attachments and
+  art. 73 — and the parser threw all of them away. A FatturaPA round trip is
+  now lossless, pinned by a test over every field the model has, with one
+  documented exception: `ScontoMaggiorazione` has no field for the VAT rate a
+  document-level charge belongs to, so that rate is assumed on the way back in.
+- **FatturaPA omitted fields the format models**: `IscrizioneREA`,
+  `Contatti/Email`, and the payment block's `Beneficiario`,
+  `IstitutoFinanziario` and `BIC`. `RiferimentoAmministrazione` now carries
+  BT-10 (BuyerReference), which had nowhere to go before.
+- **UBL dropped the party's tax code** whenever a VAT number was also present —
+  which is the normal case in Italy, where the codice fiscale is the identifier
+  of a natural person. It also dropped the payee account holder (BT-85) and the
+  servicing bank (BT-86).
+- **Contact email was dropped by both EN 16931 syntaxes**, although BG-6/BG-9
+  model it. That was our gap, not the standard's.
+- **Non-finite amounts passed validation.** `NaN` and the infinities are valid
+  `Decimal`s and arithmetically contagious: one in a line price used to yield a
+  document total of `NaN`, or an `InvalidOperation` raised from inside XML
+  generation — both far from the mistake that caused them. Amounts are now
+  checked where they enter (`money.D`), which is the single funnel every one of
+  them passes through.
+
+### CI
+
+- **The `core-without-extras` job was broken and had been since 0.5.0.** Its
+  inline snippet used VAT numbers that stopped validating the day check-digit
+  verification landed. The snippet is now `scripts/smoke_core.py` — in the
+  repository, covered by the test suite, and refusing to pass when the extras
+  *are* installed, so it cannot drift or pass vacuously.
+- New `reference-data` job: runs the data-consistency suites and **fails when
+  the tax data is over a year old**. Rates and mandates rot silently — nothing
+  breaks, the answers just stop being true — so the staleness date is enforced
+  rather than decorative.
+- The `build` job now installs the built wheel into a clean environment and
+  runs the console script, because a wheel that builds but does not install is
+  a wheel nobody can use. Artifacts are uploaded.
+- New `version-matches-tag` job: a tag that disagrees with `__version__` ships a
+  package claiming to be something it is not.
+- Least-privilege `permissions`, `concurrency` cancellation (except on main),
+  pip caching, `workflow_dispatch`, ruff's GitHub annotation format.
+- Added `.github/dependabot.yml` — configured never to widen the runtime
+  dependency set, because the zero-dependency core is a property to defend, not
+  an accident to be updated away — and a PR template.
+
+### Changed
+
+- **Breaking:** a seller's own VAT number must now pass its country's check
+  digit. Previously any correctly-shaped string was accepted. A wrong number
+  was always going to be rejected downstream by SdI or the receiving Access
+  Point; it now fails locally with a clear message instead. The *buyer's*
+  number remains advisory (`check()`), because you are given it and cannot
+  always fix it.
+- `ProviderPreset.country` is now a property over `countries`; existing call
+  sites keep working, and a multi-market platform is findable from every market
+  it serves.
+- Author metadata is no longer tied to one host application.
+- Test suite: 157 → **1640**.
+
 ## [0.4.0] — 2026-08-24
 
 The release that makes the package usable **outside** the applications it grew

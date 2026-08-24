@@ -16,18 +16,18 @@ def test_build_package_hashes_and_index(tmp_path):
     src.write_bytes(XML_B)
     records = [
         {
-            "filename": "IT01234567890_00001.xml",
+            "filename": "IT01234567897_00001.xml",
             "content": XML_A,
             "invoice_number": "2026/0001",
             "invoice_date": "2026-01-15",
             "counterpart_vat": "RSSMRA80A01F205X",
         },
         {  # from path, signed variant
-            "filename": "IT01234567890_00002.xml.p7m",
+            "filename": "IT01234567897_00002.xml.p7m",
             "path": str(src),
             "invoice_number": "2026/0002",
             "invoice_date": "2026-02-10",
-            "counterpart_vat": "09876543210",
+            "counterpart_vat": "09876543217",
         },
     ]
     zip_path = build_conservation_package(records, tmp_path / "out", package_name="conservazione_2026")
@@ -35,20 +35,20 @@ def test_build_package_hashes_and_index(tmp_path):
 
     with zipfile.ZipFile(zip_path) as zf:
         names = set(zf.namelist())
-        assert {"IT01234567890_00001.xml", "IT01234567890_00002.xml.p7m", "manifest.json", "pdd_index.xml"} == names
-        assert zf.read("IT01234567890_00001.xml") == XML_A
-        assert zf.read("IT01234567890_00002.xml.p7m") == XML_B
+        assert {"IT01234567897_00001.xml", "IT01234567897_00002.xml.p7m", "manifest.json", "pdd_index.xml"} == names
+        assert zf.read("IT01234567897_00001.xml") == XML_A
+        assert zf.read("IT01234567897_00002.xml.p7m") == XML_B
 
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["algorithm"] == "SHA-256"
         by_name = {d["filename"]: d for d in manifest["documents"]}
-        assert by_name["IT01234567890_00001.xml"]["sha256"] == hashlib.sha256(XML_A).hexdigest()
-        assert by_name["IT01234567890_00002.xml.p7m"]["sha256"] == hashlib.sha256(XML_B).hexdigest()
-        assert by_name["IT01234567890_00001.xml"]["invoice_number"] == "2026/0001"
-        assert by_name["IT01234567890_00002.xml.p7m"]["counterpart_vat"] == "09876543210"
+        assert by_name["IT01234567897_00001.xml"]["sha256"] == hashlib.sha256(XML_A).hexdigest()
+        assert by_name["IT01234567897_00002.xml.p7m"]["sha256"] == hashlib.sha256(XML_B).hexdigest()
+        assert by_name["IT01234567897_00001.xml"]["invoice_number"] == "2026/0001"
+        assert by_name["IT01234567897_00002.xml.p7m"]["counterpart_vat"] == "09876543217"
 
         index = zf.read("pdd_index.xml").decode()
-        assert "IT01234567890_00001.xml" in index
+        assert "IT01234567897_00001.xml" in index
         assert hashlib.sha256(XML_B).hexdigest() in index
         assert 'documenti="2"' in index
 

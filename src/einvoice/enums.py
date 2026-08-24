@@ -14,7 +14,7 @@ class TransmissionFormat(str, Enum):
 
 
 class DocumentType(str, Enum):
-    """Italian ``TipoDocumento`` (specifiche 1.2.2, lista completa TD01–TD06 +
+    """Italian ``TipoDocumento`` (specifiche 1.2.2, complete list TD01–TD09 +
     TD16–TD28); ``.uncl1001`` maps to the EN 16931 type code (UNCL 1001) used
     by UBL/CII.
 
@@ -30,6 +30,9 @@ class DocumentType(str, Enum):
     CREDIT_NOTE = "TD04"                   # nota di credito
     DEBIT_NOTE = "TD05"                    # nota di debito
     FEE = "TD06"                           # parcella
+    SIMPLIFIED_INVOICE = "TD07"            # fattura semplificata
+    SIMPLIFIED_CREDIT_NOTE = "TD08"        # nota di credito semplificata
+    SIMPLIFIED_DEBIT_NOTE = "TD09"         # nota di debito semplificata
     REVERSE_CHARGE_INTERNAL = "TD16"       # integrazione fattura reverse charge interno
     SELF_INVOICE = "TD16"                  # alias storico di REVERSE_CHARGE_INTERNAL
     SELF_INVOICE_FOREIGN_SERVICES = "TD17"  # integrazione/autofattura servizi dall'estero
@@ -52,12 +55,38 @@ class DocumentType(str, Enum):
             "TD03": "386",   # prepayment invoice
             "TD04": "381",   # credit note
             "TD05": "383",   # debit note
+            "TD08": "381",   # simplified credit note — still a credit note
+            "TD09": "383",   # simplified debit note
         }
         return special.get(self.value, "380")  # commercial invoice / self-billed
 
     @property
     def is_credit_note(self) -> bool:
-        return self in (DocumentType.CREDIT_NOTE,)
+        """Whether the document REDUCES what the buyer owes.
+
+        Load-bearing well beyond a label: UBL puts credit notes on a different
+        root element with different line tags, so getting this wrong produces a
+        document on the wrong schema entirely. The *simplified* credit note
+        (TD08) counts — "simplified" describes how little the buyer has to be
+        identified, not what the document does.
+        """
+        return self in (DocumentType.CREDIT_NOTE, DocumentType.SIMPLIFIED_CREDIT_NOTE)
+
+    @property
+    def is_debit_note(self) -> bool:
+        """Whether the document INCREASES what the buyer owes.
+
+        A debit note is not a credit note with the sign flipped: it stays on the
+        Invoice root and carries UNCL 383. The distinction exists because both
+        correct an earlier invoice, in opposite directions.
+        """
+        return self in (DocumentType.DEBIT_NOTE, DocumentType.SIMPLIFIED_DEBIT_NOTE)
+
+    @property
+    def corrects_an_earlier_document(self) -> bool:
+        """True for credit and debit notes — the documents that only make sense
+        with a reference to what they correct."""
+        return self.is_credit_note or self.is_debit_note
 
 
 class VatNature(str, Enum):

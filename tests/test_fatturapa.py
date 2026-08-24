@@ -25,9 +25,9 @@ from einvoice.enums import WithholdingType
 def _enriched() -> Invoice:
     return Invoice(
         number="2026/0001", date=date(2026, 6, 5),
-        seller=Party(name="Studio Mario", vat_number="01234567890",
+        seller=Party(name="Studio Mario", vat_number="01234567897",
                      address=Address("Via Roma 1", "20100", "Milano", "MI")),
-        buyer=Party(name="ACME Srl", vat_number="09876543210",
+        buyer=Party(name="ACME Srl", vat_number="09876543217",
                     address=Address("Via Verdi 9", "00100", "Roma", "RM"), sdi_code="ABCDEF1"),
         lines=[
             LineItem.from_gross("Cibo", 1, Decimal("110.00"), 10),
@@ -79,9 +79,9 @@ def _full() -> Invoice:
     return Invoice(
         number="2026/0042", date=date(2026, 6, 5),
         document_type=DocumentType.DEFERRED_INVOICE,
-        seller=Party(name="Studio Mario", vat_number="01234567890",
+        seller=Party(name="Studio Mario", vat_number="01234567897",
                      address=Address("Via Roma 1", "20100", "Milano", "MI")),
-        buyer=Party(name="ACME Srl", vat_number="09876543210",
+        buyer=Party(name="ACME Srl", vat_number="09876543217",
                     address=Address("Via Verdi 9", "00100", "Roma", "RM"), sdi_code="ABCDEF1"),
         lines=[
             LineItem("Onorario", Decimal("1"), Decimal("100"), Decimal("22"),
@@ -171,7 +171,7 @@ def test_attachment_format_and_description():
 def test_foreign_buyer_conventions():
     inv = Invoice(
         number="2026/0099", date=date(2026, 6, 5),
-        seller=Party(name="Studio Mario", vat_number="01234567890",
+        seller=Party(name="Studio Mario", vat_number="01234567897",
                      address=Address("Via Roma 1", "20100", "Milano", "MI")),
         buyer=Party(name="Maple Ltd", vat_number="GB123456789", country_code="GB",
                     address=Address("1 King St", "SW1A 1AA", "London", None, "GB")),

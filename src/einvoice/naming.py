@@ -8,6 +8,7 @@ only has to persist a single integer per transmitter.
 """
 from __future__ import annotations
 
+import re
 import string
 
 _ALPHABET = string.digits + string.ascii_uppercase  # base-36: 0-9 A-Z
@@ -38,3 +39,24 @@ def sdi_filename(country_code: str, fiscal_code: str, progressive: int | str) ->
     if not prog or len(prog) > 5 or any(c not in _ALPHABET for c in prog):
         raise ValueError("progressivo non valido: max 5 caratteri [A-Z0-9]")
     return f"{country_code.upper()}{fiscal_code}_{prog}.xml"
+
+
+_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def safe_filename(*parts: str | None, suffix: str = ".xml", fallback: str = "invoice") -> str:
+    """A filesystem-safe name from whatever identifiers are available.
+
+    Deliberately NOT :func:`sdi_filename`: that name is an Italian
+    transmission requirement, and applying it to a UBL or CII document
+    produced two bugs at once — a Swiss VAT number's dots leaked into the
+    name, and a seller without a VAT number produced the literal
+    ``"GBNone_00001.xml"``. Here a missing part is skipped, not stringified.
+    """
+    cleaned = [
+        _UNSAFE.sub("-", str(part)).strip("-")
+        for part in parts
+        if part not in (None, "")
+    ]
+    stem = "_".join(c for c in cleaned if c) or fallback
+    return f"{stem[:120]}{suffix}"

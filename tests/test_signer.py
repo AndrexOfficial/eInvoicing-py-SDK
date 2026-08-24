@@ -79,7 +79,7 @@ def test_sign_cades_empty_content():
 
 
 def test_sign_filename():
-    assert sign_filename("IT01234567890_00001.xml") == "IT01234567890_00001.xml.p7m"
+    assert sign_filename("IT01234567897_00001.xml") == "IT01234567897_00001.xml.p7m"
 
 
 def test_p12_signer_protocol():
@@ -88,6 +88,6 @@ def test_p12_signer_protocol():
     p12, _ = _make_p12()
     signer = P12Signer(p12, PASSPHRASE)
     assert isinstance(signer, Signer)
-    signed, fname = signer.sign(XML, filename="IT01234567890_00001.xml")
-    assert fname == "IT01234567890_00001.xml.p7m"
+    signed, fname = signer.sign(XML, filename="IT01234567897_00001.xml")
+    assert fname == "IT01234567897_00001.xml.p7m"
     assert XML in signed

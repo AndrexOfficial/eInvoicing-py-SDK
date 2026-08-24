@@ -11,15 +11,15 @@ def test_to_base36_padding():
 
 
 def test_sdi_filename_from_int():
-    assert sdi_filename("IT", "01234567890", 7) == "IT01234567890_00007.xml"
+    assert sdi_filename("IT", "01234567897", 7) == "IT01234567897_00007.xml"
 
 
 def test_sdi_filename_from_string():
-    assert sdi_filename("it", "01234567890", "abc12") == "IT01234567890_ABC12.xml"
+    assert sdi_filename("it", "01234567897", "abc12") == "IT01234567897_ABC12.xml"
 
 
 def test_sdi_filename_rejects_bad_progressive():
     with pytest.raises(ValueError):
-        sdi_filename("IT", "01234567890", "TOOLONG6")
+        sdi_filename("IT", "01234567897", "TOOLONG6")
     with pytest.raises(ValueError):
-        sdi_filename("IT", "01234567890", "ab-1")
+        sdi_filename("IT", "01234567897", "ab-1")

@@ -3,10 +3,28 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
   pull_request:
+  workflow_dispatch:
+
+# Read-only by default. Any job needing more asks for it explicitly.
+permissions:
+  contents: read
+
+# A new push to the same branch supersedes the run in flight — except on main,
+# where every commit's result is worth keeping.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  PYTHONUNBUFFERED: "1"
+  # Fail on warnings that indicate a real problem rather than noise.
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
   test:
+    name: tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -17,61 +35,83 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev]"
-      - run: pytest -q
+      - run: pytest -q --durations=10
 
   core-without-extras:
-    # The selling point of the package is that XML generation needs nothing but
-    # the standard library. That claim is only true if it is tested: install the
-    # bare package and prove the core still renders with httpx and cryptography
-    # absent, so a stray top-level import cannot slip in unnoticed.
+    name: core has no dependencies
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # Deliberately NOT ".[dev]" — this job exists to prove the package works
+      # with neither httpx nor cryptography present. The script it runs lives in
+      # the repo and is covered by the test suite, so it cannot drift the way an
+      # inline snippet did.
       - run: pip install -e .
-      - run: pip install pytest
-      - name: no optional dependency is importable
-        run: |
-          python - <<'PY'
-          import importlib.util, sys
-          for mod in ("httpx", "cryptography"):
-              if importlib.util.find_spec(mod) is not None:
-                  sys.exit(f"{mod} must NOT be installed for this job")
-          PY
-      - name: the core renders anyway
+      - run: python scripts/smoke_core.py
+      - run: python -m einvoice transports
+      - run: python -m einvoice countries
+      - run: python -m einvoice rates IT
+      - run: python -c "from einvoice.reference import all_country_references as f; assert len(f()) >= 30"
+
+  lint:
+    name: ruff + mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      - run: ruff check --output-format=github .
+      # mypy is enforced, not advisory: the package ships py.typed, so a type
+      # error here is a type error in every downstream project that trusts it.
+      - run: mypy
+
+  reference-data:
+    name: reference data is self-consistent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      # Tax rates, country profiles and platform presets are data, and data
+      # rots differently from code: nothing breaks, the answers just quietly
+      # stop being true. These suites check the invariants that would catch it.
+      - run: pytest -q tests/test_rates.py tests/test_regimes.py tests/test_providers.py tests/test_taxid.py tests/test_reference.py
+      - name: reference data is dated and the dates are not stale
         run: |
           python - <<'PY'
           from datetime import date
-          from decimal import Decimal
-          from einvoice import Address, Invoice, LineItem, Party, build_fattura_xml
-          xml = build_fattura_xml(Invoice(
-              number="2026/0001", date=date(2026, 6, 5),
-              seller=Party(name="Mario", vat_number="01234567890",
-                           address=Address("Via Roma 1", "20100", "Milano", "MI")),
-              buyer=Party(name="ACME", vat_number="09876543210",
-                          address=Address("Via Verdi 9", "00100", "Roma", "RM")),
-              lines=[LineItem.from_gross("Cena", 1, Decimal("122.00"), 22)],
-          ))
-          assert b"FatturaElettronica" in xml
-          print("core OK without extras:", len(xml), "bytes")
+          from einvoice import MANDATES_VERIFIED_AS_OF, RATES_VERIFIED_AS_OF
+          today = date.today()
+          for label, stamped in (("mandates", MANDATES_VERIFIED_AS_OF),
+                                 ("VAT rates", RATES_VERIFIED_AS_OF)):
+              age_days = (today - stamped).days
+              print(f"{label}: verified {stamped} ({age_days} days ago)")
+              if age_days > 365:
+                  raise SystemExit(
+                      f"{label} data is over a year old ({stamped}). Review it "
+                      "against the national tax authorities and move the date, "
+                      "or downstream users are trusting stale tax data."
+                  )
           PY
-      - run: python -m einvoice transports
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install ruff mypy
-      - run: ruff check .
-      - run: pip install -e . && mypy || true   # advisory until fully annotated
 
   build:
+    name: build + install the wheel
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,3 +121,37 @@ jobs:
       - run: pip install build twine
       - run: python -m build
       - run: twine check dist/*
+      # A wheel that builds but does not install is a wheel nobody can use.
+      - name: install the built wheel in a clean environment
+        run: |
+          python -m venv /tmp/fresh
+          /tmp/fresh/bin/pip install --no-cache-dir dist/*.whl
+          /tmp/fresh/bin/python -c "import einvoice; print('installed', einvoice.__version__)"
+          /tmp/fresh/bin/einvoice --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14
+
+  version-matches-tag:
+    name: tag matches the package version
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      # Tags here are bare versions with no "v" prefix (0.5.0, not v0.5.0), and
+      # a tag that disagrees with __version__ ships a package claiming to be
+      # something it is not.
+      - run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="$(python -c 'import einvoice; print(einvoice.__version__)')"
+          echo "tag=$TAG version=$VERSION"
+          test "$TAG" = "$VERSION" || {
+            echo "::error::tag '$TAG' does not match __version__ '$VERSION'"
+            exit 1
+          }

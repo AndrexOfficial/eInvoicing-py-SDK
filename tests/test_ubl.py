@@ -11,9 +11,9 @@ NS = {"i": INV_NS, "cbc": CBC, "cac": CAC}
 def _invoice() -> Invoice:
     return Invoice(
         number="2026/0001", date=date(2026, 6, 5),
-        seller=Party(name="Trattoria da Mario", vat_number="01234567890",
+        seller=Party(name="Trattoria da Mario", vat_number="01234567897",
                      address=Address("Via Roma 1", "20100", "Milano", "MI")),
-        buyer=Party(name="ACME Srl", vat_number="09876543210",
+        buyer=Party(name="ACME Srl", vat_number="09876543217",
                     address=Address("Via Verdi 9", "00100", "Roma", "RM")),
         lines=[
             LineItem.from_gross("Cibo", 1, Decimal("110.00"), 10),
@@ -34,7 +34,7 @@ def test_ubl_parties_and_vat():
     root = ET.fromstring(build_ubl_xml(_invoice()))
     supplier = root.find("cac:AccountingSupplierParty/cac:Party", NS)
     assert supplier.findtext("cac:PartyLegalEntity/cbc:RegistrationName", namespaces=NS) == "Trattoria da Mario"
-    assert supplier.findtext("cac:PartyTaxScheme/cbc:CompanyID", namespaces=NS) == "IT01234567890"
+    assert supplier.findtext("cac:PartyTaxScheme/cbc:CompanyID", namespaces=NS) == "IT01234567897"
 
 
 def test_ubl_tax_and_totals():
@@ -95,11 +95,18 @@ def test_endpoint_id_derivation_and_omission():
                        address=Address("Hauptstr. 1", "10115", "Berlin", None, "DE"))
     root = ET.fromstring(build_ubl_xml(inv))
     sup = root.find("cac:AccountingSupplierParty/cac:Party/cbc:EndpointID", NS)
-    assert sup.text == "IT01234567890" and sup.get("schemeID") == "0211"
+    assert sup.text == "IT01234567897" and sup.get("schemeID") == "0211"
     cus = root.find("cac:AccountingCustomerParty/cac:Party/cbc:EndpointID", NS)
     assert cus.text == "DE123456789" and cus.get("schemeID") == "9930"
-    inv.buyer = _Party(name="Swiss AG", vat_number="999999999", country_code="CH",
+    # Switzerland routes on EAS 0183 with the bare UID.
+    inv.buyer = _Party(name="Swiss AG", vat_number="CHE-116.281.710", country_code="CH",
                        address=Address("Bahnhofstr. 1", "8000", "Zurigo", None, "CH"))
+    root = ET.fromstring(build_ubl_xml(inv))
+    ch = root.find("cac:AccountingCustomerParty/cac:Party/cbc:EndpointID", NS)
+    assert ch.text == "CHE116281710" and ch.get("schemeID") == "0183"
+    # A country with no EAS mapping omits the element entirely.
+    inv.buyer = _Party(name="Nowhere Ltd", vat_number="123456789", country_code="ZZ",
+                       address=Address("Road 1", "0000", "Nowhere", None, "ZZ"))
     root = ET.fromstring(build_ubl_xml(inv))
     assert root.find("cac:AccountingCustomerParty/cac:Party/cbc:EndpointID", NS) is None
 

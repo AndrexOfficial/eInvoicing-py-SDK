@@ -26,9 +26,10 @@ from .enums import (
 )
 from .errors import ValidationError
 from .money import D, q2, q6
+from .rates import ProductCategory, rate_for
 
 __all__ = [
-    "Address", "Party", "LineItem", "VatSummary", "AllowanceCharge",
+    "Address", "Party", "LineItem", "VatSummary", "AllowanceCharge", "Advisory",
     "WithholdingTax", "SocialSecurityFund", "DocumentReference", "Attachment",
     "BankAccount", "Payment", "Invoice", "DocumentType", "TransmissionFormat",
     "VatNature", "VatExigibility", "PaymentMeans", "WithholdingType",
@@ -76,6 +77,9 @@ PEPPOL_EAS_BY_COUNTRY = {
     "FI": "0216",
     # United Kingdom (GB:VAT).
     "GB": "9932",
+    # Switzerland — CH UID (the CHE number), used as-is, NOT VAT-prefixed:
+    # the identifier already carries its own "CHE" prefix.
+    "CH": "0183",
 }
 
 _VAT_PREFIXED_SCHEMES = frozenset(
@@ -83,6 +87,11 @@ _VAT_PREFIXED_SCHEMES = frozenset(
      "9930", "9931", "9932", "9933", "9934", "9935", "9937", "9938", "9939",
      "9943", "9944", "9945", "9946", "9947", "9949", "9950", "9957"}
 )
+
+
+#: Countries whose tax identifier already carries its own alphabetic prefix —
+#: adding the ISO country code would produce "CHCHE123456789".
+_SELF_PREFIXED_TAX_IDS = frozenset({"CH"})
 
 
 def _vies_prefix(country_code: str) -> str:
@@ -121,6 +130,14 @@ class Party:
             return self.name
         return " ".join(p for p in (self.first_name, self.last_name) if p) or "—"
 
+    def normalized_vat(self) -> str:
+        """The bare VAT/UID number: no country prefix, no dots, dashes or
+        spaces. Printed forms (``"CHE-116.281.710 MWST"``, ``"IT 0123 456 7891"``)
+        must never reach the XML — a receiver matches on the exact string."""
+        from .taxid import normalize_tax_id
+
+        return normalize_tax_id(self.country_code, self.vat_number)
+
     def peppol_endpoint(self) -> tuple[str | None, str | None]:
         """``(scheme, id)`` for the UBL ``EndpointID``.
 
@@ -134,20 +151,43 @@ class Party:
         scheme = PEPPOL_EAS_BY_COUNTRY.get(self.country_code)
         if scheme is None or not self.vat_number:
             return None, None
+        bare = self.normalized_vat()
         if scheme in _VAT_PREFIXED_SCHEMES:
-            return scheme, f"{_vies_prefix(self.country_code)}{self.vat_number}"
-        return scheme, self.vat_number
+            return scheme, f"{_vies_prefix(self.country_code)}{bare}"
+        return scheme, bare
 
     def tax_company_id(self) -> str | None:
         """The ``PartyTaxScheme/CompanyID``: VIES-prefixed VAT number for
-        VAT countries (Greece → "EL"), the bare id elsewhere (e.g. US EIN)."""
+        VAT countries (Greece → "EL"), the bare id elsewhere (e.g. US EIN).
+
+        The number is normalized first, so a party stored as ``"IT01234567891"``
+        does not come out as ``"ITIT01234567891"``, and Switzerland is not
+        prefixed at all — a Swiss UID already begins with its own ``CHE``.
+        """
         if not self.vat_number:
             return None
         from .countries import profile_for
 
+        bare = self.normalized_vat()
+        if self.country_code in _SELF_PREFIXED_TAX_IDS:
+            return bare
         if profile_for(self.country_code).tax_scheme == "VAT":
-            return f"{_vies_prefix(self.country_code)}{self.vat_number}"
-        return self.vat_number
+            return f"{_vies_prefix(self.country_code)}{bare}"
+        return bare
+
+    @property
+    def postal_address(self) -> Address:
+        """The address, guaranteed present.
+
+        :meth:`validate` already enforces this and every renderer runs after
+        ``Invoice.validate()``, but renderers reach into the address a dozen
+        times each. Going through here means a broken invariant raises with a
+        name attached instead of emitting a document with an empty address
+        block — or an ``AttributeError`` from deep inside XML generation.
+        """
+        if self.address is None:
+            raise ValidationError(f"{self.display_name()}: indirizzo mancante")
+        return self.address
 
     def validate(self, *, role: str) -> None:
         if not (self.name or (self.first_name and self.last_name)):
@@ -191,6 +231,12 @@ class LineItem:
     period_start: date | None = None
     period_end: date | None = None
     exemption_reason: str | None = None  # testo UBL/RiferimentoNormativo (fallback: nature)
+    #: What is being sold, in the vocabulary reduced rates are written in.
+    #: Optional and purely advisory: setting it lets :meth:`Invoice.check`
+    #: compare the rate you used against the one the country applies to that
+    #: kind of supply. It is not rendered into any format — no e-invoicing
+    #: standard carries it — and nothing validates against it.
+    category: ProductCategory | None = None
 
     def __post_init__(self) -> None:
         self.quantity = D(self.quantity)
@@ -285,6 +331,21 @@ class Payment:
     condition: str = "TP02"           # CondizioniPagamento
 
 
+@dataclass(frozen=True)
+class Advisory:
+    """A non-fatal finding from :meth:`Invoice.check`.
+
+    ``code`` is stable and machine-readable so a caller can suppress a class of
+    finding it has already reasoned about; ``message`` is for a human.
+    """
+
+    code: str
+    message: str
+
+    def __str__(self) -> str:
+        return f"[{self.code}] {self.message}"
+
+
 @dataclass
 class VatSummary:
     vat_rate: Decimal
@@ -375,8 +436,16 @@ class Invoice:
             rate = ac.vat_rate if ac.vat_rate is not None else self.lines[0].vat_rate
             prefix = f"{rate:.2f}|"
             key = next((k for k in order if k.startswith(prefix)), None)
-            if key is not None:
-                buckets[key][0] += ac.signed
+            if key is None:
+                # A document charge at a rate no line uses still has to be
+                # taxed and totalled. Skipping it — which is what this did —
+                # made the amount vanish from the totals while still being
+                # rendered into the XML: an invoice that under-bills and does
+                # not add up. Give it its own riepilogo instead.
+                key = key_for(rate, None)
+                buckets[key] = [Decimal("0"), None, None]
+                order.append(key)
+            buckets[key][0] += ac.signed
         out: list[VatSummary] = []
         for key in order:
             rate = D(key.split("|", 1)[0])
@@ -429,7 +498,11 @@ class Invoice:
 
         The Italian-only constraints (RegimeFiscale, CodiceDestinatario, CAP,
         Natura) live in the IT :class:`~einvoice.countries.CountryProfile`, so
-        the same neutral invoice validates for EU/UK/US sellers too.
+        the same neutral invoice validates for EU/UK/CH/US sellers too.
+
+        Raises on anything that makes the document *wrong*. For things that are
+        merely *suspicious* — an implausible VAT rate, a cross-border supply
+        that looks like it should be reverse-charged — see :meth:`check`.
         """
         from .countries import profile_for
 
@@ -440,3 +513,142 @@ class Invoice:
         if not self.number:
             raise ValidationError("Numero documento mancante")
         profile_for(self.seller.country_code).validate_invoice(self)
+
+    def check(self) -> list[Advisory]:
+        """Non-fatal findings: things worth a human look before sending.
+
+        Separate from :meth:`validate` on purpose. A hard failure must mean
+        "this document is invalid"; an unusual VAT rate or a missing buyer VAT
+        number on a cross-border supply is often legitimate, and refusing to
+        emit those would block real invoices. Returning them instead lets a UI
+        surface a warning and a batch job log one.
+
+        Never raises — a malformed invoice simply yields whatever findings are
+        computable.
+        """
+        from .countries import EU_COUNTRIES, profile_for
+
+        out: list[Advisory] = []
+        seller_country = self.seller.country_code
+        buyer_country = self.buyer.country_code
+        profile = profile_for(seller_country)
+
+        out.extend(Advisory("country", m) for m in profile.advisories(self))
+
+        # Cross-border EU B2B: the supply is normally reverse-charged, so a
+        # domestic VAT rate on it is a common and expensive mistake.
+        cross_border_eu = (
+            seller_country in EU_COUNTRIES
+            and buyer_country in EU_COUNTRIES
+            and seller_country != buyer_country
+        )
+        if cross_border_eu and self.buyer.vat_number:
+            taxed = [ln for ln in self.lines if ln.vat_rate > 0]
+            if taxed:
+                out.append(Advisory(
+                    "intra_eu_vat",
+                    f"Cessione intracomunitaria {seller_country}→{buyer_country} con "
+                    f"IVA esposta su {len(taxed)} riga/e: di norma è non imponibile "
+                    "(inversione contabile). Verificare il regime.",
+                ))
+        if cross_border_eu and not self.buyer.vat_number:
+            out.append(Advisory(
+                "intra_eu_no_vat_id",
+                f"Cessionario in {buyer_country} senza partita IVA: senza un "
+                "identificativo valido l'operazione non può essere trattata come "
+                "cessione intracomunitaria.",
+            ))
+
+        # A supply out of the EU that still carries VAT.
+        if (seller_country in EU_COUNTRIES and buyer_country
+                and buyer_country not in EU_COUNTRIES
+                and any(ln.vat_rate > 0 for ln in self.lines)):
+            out.append(Advisory(
+                "export_vat",
+                f"Operazione verso {buyer_country} (fuori UE) con IVA esposta: "
+                "un'esportazione è di norma non imponibile.",
+            ))
+
+        if self.currency != profile.currency_hint and profile.currency_hint:
+            out.append(Advisory(
+                "currency",
+                f"Valuta {self.currency} diversa da quella abituale di "
+                f"{seller_country} ({profile.currency_hint}): assicurarsi che il "
+                "destinatario la accetti.",
+            ))
+
+        if self.payments and any(
+            p.due_date and p.due_date < self.date for p in self.payments
+        ):
+            out.append(Advisory(
+                "due_date",
+                "Data di scadenza anteriore alla data del documento.",
+            ))
+
+        out.extend(self._correction_advisories())
+        out.extend(self._category_advisories(seller_country))
+        return out
+
+    def _category_advisories(self, seller_country: str) -> list[Advisory]:
+        """Lines whose rate disagrees with what the country charges for that
+        kind of supply.
+
+        Only fires for lines that declared a :attr:`LineItem.category`, and only
+        where this package can state the country's rate for it — an unmapped
+        category is silence, not a complaint. Reduced-rate law turns on
+        distinctions an invoice does not carry, so a mismatch is a question
+        worth asking, never a verdict.
+        """
+        out: list[Advisory] = []
+        for line in self.lines:
+            if line.category is None:
+                continue
+            expected = rate_for(seller_country, line.category)
+            if expected is None or D(expected) == line.vat_rate:
+                continue
+            out.append(Advisory(
+                "rate_category",
+                f"Riga '{line.description}': aliquota {line.vat_rate}% per "
+                f"'{line.category.value}', ma {seller_country} applica di norma "
+                f"{expected}% a questa categoria. Verificare — le eccezioni "
+                "nazionali esistono, ma di solito è un errore di aliquota.",
+            ))
+        return out
+
+    def _correction_advisories(self) -> list[Advisory]:
+        """Findings specific to credit and debit notes.
+
+        Both are corrections to an earlier invoice, and both go wrong in the
+        same two ways: the sign gets applied twice, or the document says nothing
+        about what it is correcting.
+        """
+        out: list[Advisory] = []
+        if not self.document_type.corrects_an_earlier_document:
+            return out
+
+        # A credit note already means "we owe you"; the direction is carried by
+        # the document type, not by the sign of the amounts. Entering the
+        # amounts as negatives applies it twice and produces a document that
+        # asks the customer to pay — the expensive version of this mistake.
+        total = self.total_document()
+        kind = "nota di credito" if self.document_type.is_credit_note else "nota di debito"
+        if total < 0:
+            out.append(Advisory(
+                "correction_sign",
+                f"{kind.capitalize()} con totale negativo ({total}). Il verso è già "
+                "dato dal tipo documento: gli importi vanno indicati POSITIVI, "
+                "altrimenti il segno si applica due volte e il documento dice "
+                "l'opposto di quello che intende.",
+            ))
+
+        # Without a reference the receiver cannot match the correction to
+        # anything. SdI and most CIUS accept it, so this is a warning — but an
+        # unmatched credit note sits in the customer's ledger unapplied.
+        if not any(ref.kind == "invoice" for ref in self.references):
+            out.append(Advisory(
+                "correction_no_reference",
+                f"{kind.capitalize()} senza riferimento alla fattura che "
+                "rettifica: il destinatario non può abbinarla. Aggiungere un "
+                "DocumentReference(kind='invoice', doc_id=…).",
+            ))
+        return out

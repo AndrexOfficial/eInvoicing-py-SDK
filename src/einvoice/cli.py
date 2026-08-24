@@ -25,11 +25,36 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .countries import COUNTRY_PROFILES, profile_for, renderer_for_country, validate_tax_id
+from .countries import (
+    COUNTRY_PROFILES,
+    EU_OSS_THRESHOLD,
+    MANDATES_VERIFIED_AS_OF,
+    profile_for,
+    renderer_for_country,
+    validate_tax_id,
+)
 from .errors import EInvoiceError
 from .formats import available_renderers, get_renderer
+from .parsing import compare_declared_totals, detect_standard, parse_invoice
+from .rates import (
+    NO_NATIONAL_VAT,
+    RATES_VERIFIED_AS_OF,
+    ProductCategory,
+    RateKind,
+    rate_for,
+    rates_for,
+    standard_rate,
+)
 from .serde import invoice_from_json, invoice_to_json
-from .transport import available_transports
+from .transport import (
+    PROVIDER_KINDS,
+    PROVIDER_PRESETS,
+    available_providers,
+    available_transports,
+    preset_for,
+    providers_for_country,
+    providers_of_kind,
+)
 
 EXIT_OK, EXIT_INVALID, EXIT_USAGE = 0, 1, 2
 
@@ -112,24 +137,229 @@ def cmd_sign(args) -> int:
     return EXIT_OK
 
 
+def cmd_parse(args) -> int:
+    """Read a received e-invoice and print it as our JSON shape.
+
+    The inbound half: point it at whatever a supplier sent and get back a
+    document you can diff, store or re-render.
+    """
+    raw = sys.stdin.buffer.read() if args.path == "-" else Path(args.path).read_bytes()
+    invoice = parse_invoice(raw, standard=args.standard)
+    if args.out:
+        Path(args.out).write_text(invoice_to_json(invoice), encoding="utf-8")
+        print(f"{detect_standard(raw)} → {args.out}", file=sys.stderr)
+    else:
+        print(invoice_to_json(invoice))
+    return EXIT_OK
+
+
+def cmd_inspect(args) -> int:
+    """Summarise a received document: who, how much, and does it add up.
+
+    Exits 1 when the total the supplier states disagrees with what their own
+    lines produce — the one discrepancy worth stopping a pipeline for.
+    """
+    raw = sys.stdin.buffer.read() if args.path == "-" else Path(args.path).read_bytes()
+    standard = detect_standard(raw)
+    invoice = parse_invoice(raw, standard=standard)
+    totals = compare_declared_totals(raw)
+
+    print(f"formato      {standard}")
+    print(f"documento    {invoice.number}  del {invoice.date}  "
+          f"({invoice.document_type.value})")
+    print(f"cedente      {invoice.seller.display_name()}  "
+          f"[{invoice.seller.country_code} {invoice.seller.vat_number or '—'}]")
+    print(f"cessionario  {invoice.buyer.display_name()}  "
+          f"[{invoice.buyer.country_code} {invoice.buyer.vat_number or '—'}]")
+    print(f"righe        {len(invoice.lines)}")
+    print(f"imponibile   {invoice.taxable_total()} {invoice.currency}")
+    print(f"imposta      {invoice.tax_total()} {invoice.currency}")
+    print(f"totale       calcolato {totals['computed']} {invoice.currency}"
+          + (f" · dichiarato {totals['declared']}" if totals["declared"] is not None else ""))
+
+    for finding in invoice.check():
+        print(f"rilievo      {finding.code}: {finding.message}")
+
+    difference = totals["difference"]
+    if difference:
+        print(f"DISALLINEAMENTO  il totale dichiarato differisce di {difference} "
+              f"{invoice.currency} da quanto risulta dalle righe")
+        return EXIT_INVALID
+    return EXIT_OK
+
+
+def cmd_check(args) -> int:
+    """Advisory findings — what a human should look at before sending.
+
+    Exits 0 even when it finds something: these are warnings, not errors, and a
+    pipeline that treats them as failures would block legitimate invoices. Use
+    ``--strict`` to opt into a non-zero exit.
+    """
+    invoice = _load(args.path)
+    findings = invoice.check()
+    if not findings:
+        print("nessun rilievo")
+        return EXIT_OK
+    for finding in findings:
+        print(f"{finding.code}: {finding.message}")
+    return EXIT_INVALID if args.strict else EXIT_OK
+
+
 def cmd_countries(args) -> int:
     if args.code:
         profile = profile_for(args.code)
+        regime = profile.regime
         print(json.dumps({
             "code": profile.code, "name": profile.name,
+            "eu_member": profile.eu_member,
             "default_standard": profile.default_standard,
             "tax_scheme": profile.tax_scheme,
+            "tax_id_label": profile.tax_id_label,
+            "tax_id_validation": profile.tax_id_validation,
             "tax_id_pattern": profile.tax_id_pattern,
-            "peppol": profile.code in COUNTRY_PROFILES,
+            "currency": profile.currency_hint,
+            "vat_rates": list(profile.vat_rates),
+            "einvoicing": {
+                "network": regime.network,
+                "b2g": regime.b2g,
+                "b2b": regime.b2b,
+                "customization": regime.customization,
+                "national_format": regime.national_format,
+                "covered_by_this_package": regime.covered_by_this_package,
+                "notes": regime.notes,
+            },
+            "notes": profile.notes,
+            "regulatory_data_verified_as_of": MANDATES_VERIFIED_AS_OF.isoformat(),
         }, indent=2, ensure_ascii=False))
         if args.tax_id:
             ok = validate_tax_id(args.code, args.tax_id)
-            print(f"tax id {args.tax_id!r}: {'valido' if ok else 'NON valido'} per {profile.code}")
+            level = profile.tax_id_validation
+            print(f"tax id {args.tax_id!r}: {'valido' if ok else 'NON valido'} "
+                  f"per {profile.code} (verifica: {level})")
             return EXIT_OK if ok else EXIT_INVALID
         return EXIT_OK
+    print(f"{'ISO':4} {'STD':<10} {'TAX':<4} {'B2G':<10} {'B2B':<10} {'ID':<11} NOME")
     for code in sorted(COUNTRY_PROFILES):
         profile = COUNTRY_PROFILES[code]
-        print(f"{code}  {profile.default_standard:<10} {profile.tax_scheme:<4} {profile.name}")
+        r = profile.regime
+        flag = "" if r.covered_by_this_package else "  ⚠ formato nazionale"
+        print(f"{code:4} {profile.default_standard:<10} {profile.tax_scheme:<4} "
+              f"{r.b2g:<10} {r.b2b:<10} {profile.tax_id_validation:<11} "
+              f"{profile.name}{flag}")
+    print(f"\ndati normativi verificati al {MANDATES_VERIFIED_AS_OF.isoformat()} — "
+          "verificare presso l'autorità fiscale nazionale prima di farne affidamento")
+    return EXIT_OK
+
+
+def cmd_rates(args) -> int:
+    """VAT rates in force in a country, and what each one covers."""
+    code = args.country.upper()
+    entries = rates_for(code)
+    if not entries:
+        reason = NO_NATIONAL_VAT.get(code)
+        print(reason or f"Nessuna tabella di aliquote per {code!r}.")
+        return EXIT_OK if reason else EXIT_INVALID
+
+    if args.category:
+        try:
+            category = ProductCategory(args.category)
+        except ValueError:
+            print(f"Categoria sconosciuta: {args.category!r}. Disponibili: "
+                  + ", ".join(c.value for c in ProductCategory), file=sys.stderr)
+            return EXIT_USAGE
+        found = rate_for(code, category)
+        if found is None:
+            print(f"{code}: aliquota per '{category.value}' non mappata in questo "
+                  "pacchetto — verificare presso l'autorità fiscale.")
+            return EXIT_OK
+        print(f"{code}  {category.value}  →  {found}%")
+        return EXIT_OK
+
+    print(f"{'ALIQUOTA':>9}  {'TIPO':<14} CATEGORIE")
+    for entry in entries:
+        # "everything else" is a property of the standard rate alone; saying it
+        # of an unmapped zero rate would claim the opposite of what it means.
+        categories = ", ".join(c.value for c in entry.categories) or (
+            "(tutto ciò che non rientra sotto)" if entry.kind is RateKind.STANDARD
+            else "(nessuna categoria mappata)")
+        print(f"{str(entry.rate) + '%':>9}  {entry.kind.value:<14} {categories}")
+        if entry.note:
+            print(f"{'':>9}  {'':<14} — {entry.note}")
+    print(f"\naliquote verificate al {RATES_VERIFIED_AS_OF.isoformat()}; la "
+          "mappatura per categoria è parziale per scelta — una categoria non "
+          "elencata è una che questo pacchetto non sa dichiarare con certezza")
+    return EXIT_OK
+
+
+def cmd_rules(args) -> int:
+    """The non-rate obligations: retention, thresholds, deadlines."""
+    profile = profile_for(args.country)
+    rules = profile.fiscal_rules
+    print(json.dumps({
+        "country": profile.code or args.country.upper(),
+        "name": profile.name,
+        "currency": profile.currency_hint,
+        "standard_rate": str(standard_rate(profile.code)) if standard_rate(profile.code) else None,
+        "retention_years": rules.retention_years,
+        "simplified_invoice_threshold": (
+            str(rules.simplified_invoice_threshold)
+            if rules.simplified_invoice_threshold is not None else None),
+        "issue_deadline_days": rules.issue_deadline_days,
+        "domestic_reverse_charge": rules.domestic_reverse_charge,
+        "eu_oss_threshold": str(EU_OSS_THRESHOLD) if profile.eu_member else None,
+        "notes": rules.notes,
+        "einvoicing": {
+            "network": profile.regime.network,
+            "b2g": profile.regime.b2g,
+            "b2b": profile.regime.b2b,
+            "national_format": profile.regime.national_format,
+        },
+        "verified_as_of": MANDATES_VERIFIED_AS_OF.isoformat(),
+    }, indent=2, ensure_ascii=False))
+    return EXIT_OK
+
+
+def cmd_providers(args) -> int:
+    """List the e-invoicing platforms with a ready-made preset."""
+    if args.key:
+        preset = preset_for(args.key)
+        print(json.dumps({
+            "key": preset.key, "name": preset.name,
+            "countries": list(preset.countries), "kind": preset.kind,
+            "transport": preset.transport, "renderer": preset.renderer,
+            "supports": list(preset.supports),
+            "credentials": list(preset.credentials),
+            "needs_base_url": preset.needs_base_url,
+            "base_url": preset.base_url, "sandbox_url": preset.sandbox_url,
+            "endpoints_verified": preset.endpoints_verified,
+            "docs": preset.docs_url, "extra_defaults": preset.extra,
+            "notes": preset.notes,
+        }, indent=2, ensure_ascii=False))
+        return EXIT_OK
+
+    if args.kinds:
+        for kind, description in sorted(PROVIDER_KINDS.items()):
+            print(f"{kind:<20} {len(providers_of_kind(kind)):>3}  {description}")
+        return EXIT_OK
+
+    if args.country:
+        presets = providers_for_country(args.country, kind=args.kind)
+    elif args.kind:
+        presets = providers_of_kind(args.kind)
+    else:
+        presets = [PROVIDER_PRESETS[k] for k in available_providers()]
+
+    # Widths from the data, not guessed — one long key used to shear the table.
+    key_w = max((len(p.key) for p in presets), default=3) + 1
+    print(f"{'KEY':<{key_w}} {'MERCATI':<14} {'CATEGORIA':<20} {'FORMATO':<10} VERIF  NOME")
+    for preset in presets:
+        mark = "sì" if preset.endpoints_verified else "—"
+        markets = ",".join(preset.countries)
+        print(f"{preset.key:<{key_w}} {markets[:13]:<14} {preset.kind:<20} "
+              f"{preset.renderer:<10} {mark:<6} {preset.name}")
+    print(f"\n{len(presets)} piattaforme. 'verif' = endpoint implementati su contratto "
+          "pubblico e coperti dai test; altrimenti confermare i path sulla "
+          "documentazione del tuo account.")
     return EXIT_OK
 
 
@@ -176,6 +406,40 @@ def build_parser() -> argparse.ArgumentParser:
     sign.add_argument("--passphrase", default=None, help="passphrase del P12")
     sign.add_argument("-o", "--out", help="file .p7m di destinazione")
     sign.set_defaults(func=cmd_sign)
+
+    parse = sub.add_parser("parse", help="legge una fattura ricevuta → JSON")
+    parse.add_argument("path", help="XML ricevuto ('-' per stdin)")
+    parse.add_argument("--standard", choices=["fatturapa", "ubl", "cii"],
+                       help="forza il formato invece di rilevarlo")
+    parse.add_argument("-o", "--out", help="file JSON di destinazione")
+    parse.set_defaults(func=cmd_parse)
+
+    inspect = sub.add_parser("inspect", help="riepiloga una fattura ricevuta")
+    inspect.add_argument("path", help="XML ricevuto ('-' per stdin)")
+    inspect.set_defaults(func=cmd_inspect)
+
+    check = with_source(sub.add_parser(
+        "check", help="rilievi non bloccanti (aliquote, regimi, date)"))
+    check.add_argument("--strict", action="store_true",
+                       help="esci con codice 1 se ci sono rilievi")
+    check.set_defaults(func=cmd_check)
+
+    rates = sub.add_parser("rates", help="aliquote IVA di un paese, per categoria")
+    rates.add_argument("country", help="codice ISO (es. IT, DE, CH)")
+    rates.add_argument("--category", help="aliquota per una categoria specifica")
+    rates.set_defaults(func=cmd_rates)
+
+    rules = sub.add_parser("rules", help="obblighi non-aliquota: conservazione, soglie, termini")
+    rules.add_argument("country", help="codice ISO (es. IT, DE, CH)")
+    rules.set_defaults(func=cmd_rules)
+
+    providers = sub.add_parser("providers", help="piattaforme di e-invoicing supportate")
+    providers.add_argument("key", nargs="?", help="dettaglio di una piattaforma")
+    providers.add_argument("--country", help="filtra per paese (es. IT, FR, CH)")
+    providers.add_argument("--kind", help="filtra per categoria (vedi --kinds)")
+    providers.add_argument("--kinds", action="store_true",
+                           help="elenca le categorie disponibili")
+    providers.set_defaults(func=cmd_providers)
 
     countries = sub.add_parser("countries", help="elenca o descrive i profili paese")
     countries.add_argument("code", nargs="?", help="codice ISO del paese (es. IT)")

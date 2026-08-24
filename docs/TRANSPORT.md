@@ -31,7 +31,12 @@ class Transport(ABC):
 | `zucchetti` | `api_key`, `base_url` | upload XML base64 sul Digital Hub. |
 | `peppol` | `base_url`, `api_key` | **Access Point** gateway: invia **UBL** (non FatturaPA). |
 | `sdi` | (= fattureincloud) | alias del canale SdI di default; sovrascrivibile. |
+| `fattureincloud_xml` | `api_key`, `company_id` | Come sopra ma **carica la FatturaPA già renderizzata** invece di farla ri-derivare a FIC: da preferire quando l'XML è il documento di riferimento. |
 | `hub` · `infocert` · `notartel` · `wolters_kluwer` | `base_url` + `api_key` **o** `username`+`password` | Hub REST **configurabile** — vedi sotto. |
+
+Per le **piattaforme con preset pronto** (Fiscozen, Storecove, Chorus Pro, …)
+vedi [PROVIDERS.md](PROVIDERS.md): `transport_for_provider("fiscozen", …)`
+costruisce il trasporto giusto con le credenziali giuste.
 
 `extra` porta override specifici (es. `auth_url`, `sender_id`, `receiver_scheme`).
 

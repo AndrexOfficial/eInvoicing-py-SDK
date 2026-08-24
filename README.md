@@ -3,9 +3,11 @@
 **Motore di e-invoicing multicanale, standalone e riutilizzabile.**
 
 Un dominio fiscale pulito (modello unico + stati + notifiche + audit), separato
-dai formati nazionali e dai canali di trasporto. Italia-first (FatturaPA/SdI),
-con UBL/EN 16931 e PEPPOL nel motore e **profili paese** per UE-27, Regno Unito
-e Stati Uniti.
+dai formati nazionali e dai canali di trasporto. **EN 16931 in entrambe le
+sintassi** — UBL (Peppol BIS 3.0) e UN/CEFACT CII (Factur-X / ZUGFeRD / Chorus
+Pro) — più **FatturaPA/SdI**, in **scrittura e in lettura**, con **profili paese
+per UE-27 + Regno Unito + Svizzera + Stati Uniti** e preset per **65
+piattaforme**.
 
 ## Tre livelli (mix & match)
 
@@ -14,17 +16,19 @@ e Stati Uniti.
         │  validate → render → [sign] → transmit → [archive] → state/audit│
         └─────────────────────────────────────────────────────────────────┘
 core domain (no deps)        formats / renderers           transport / channels
-Invoice + Lifecycle    →     fatturapa · ubl(peppol)  →     file · fattureincloud
-+ country profiles           (+ XRechnung CIUS, US            aruba · zucchetti
-(EN16931-aligned,             sales tax; estendibili:         peppol · sdi
- stati + audit + esiti)       cii, zugferd)
+Invoice + Lifecycle    →     fatturapa                →      file · aruba
++ 30 country profiles        ubl   (Peppol BIS,               fattureincloud[_xml]
++ tax-id checksums            XRechnung/NLCIUS/CIUS-RO)       zucchetti · peppol
++ e-invoicing regimes        cii   (Factur-X, ZUGFeRD,        hub (configurabile)
++ validate() / check()        Chorus Pro)                     25 preset piattaforma
 ```
 
 | Livello | Dipendenze | Cosa fa |
 |---|---|---|
-| **Core** | nessuna | Modello fattura unico (EN 16931-aligned) + **profili paese** (UE-27/UK/US: regole, formati tax-id) + **macchina a stati** + notifiche normalizzate (esiti SdI/PEPPOL) + audit trail. |
-| **Formats** | nessuna | Renderer per standard: **FatturaPA** (IT/SdI), **UBL Peppol BIS** (EN 16931, CIUS XRechnung, schema sales-tax US). |
-| **Transport** | `httpx` (opz.) | Canali: file export, FattureInCloud, Aruba, Zucchetti, **PEPPOL Access Point**, con firma/conservazione/notifiche pluggable. |
+| **Core** | nessuna | Modello fattura unico (EN 16931-aligned) + **30 profili paese** (UE-27/UK/CH/US: regole, aliquote note, regimi e-invoicing) + **validazione tax-id con check digit** + **macchina a stati** + notifiche normalizzate (esiti SdI/PEPPOL) + audit trail. |
+| **Formats** | nessuna | **FatturaPA** (IT/SdI), **UBL** (Peppol BIS 3.0 + CIUS XRechnung/NLCIUS/CIUS-RO, sales tax US), **CII** (EN 16931 UN/CEFACT: Factur-X, ZUGFeRD, Chorus Pro). Ogni formato si **genera e si legge**. |
+| **Parsing** | nessuna | `parse_invoice()` riconosce il formato dalla radice e restituisce un `Invoice` neutro; i totali vengono **ricalcolati dalle righe**, non creduti. |
+| **Transport** | `httpx` (opz.) | Canali: file export, Aruba, FattureInCloud (strutturato **e** upload XML), Zucchetti, **PEPPOL Access Point**, hub REST configurabile, + **65 preset di piattaforma** (Fiscozen, DATEV, Storecove, Chorus Pro, …). |
 | **Signing** | `cryptography` (opz.) | Firma **CAdES `.p7m`** (PKCS#7/CMS attached, SHA-256) da certificato PKCS#12 + pacchetto di **conservazione** (ZIP + manifest hash + indice IPdA-like). |
 
 ### Cosa è supportato
@@ -49,20 +53,39 @@ resi come charge per far quadrare BR-CO-10/13/15, `PayableRoundingAmount`,
 `PaymentID` e `PaymentTerms`. **Germania B2G**: CIUS **XRechnung 3.0** via
 `renderer_for_country("DE", xrechnung=True)`.
 
+**Francia e Germania (CII / Factur-X / ZUGFeRD)** — EN 16931 ha **due** sintassi
+ammesse, e un destinatario ne accetta una sola. Il renderer `cii` produce la
+seconda: è quella che la riforma francese e ZUGFeRD scambiano davvero.
+`renderer_for_country("FR", standard="cii")`, oppure un profilo Factur-X
+esplicito (`minimum` … `extended`, e XRechnung-su-CII).
+
 **Profili paese (`einvoice.countries`)** — un `CountryProfile` per i **27 stati
-UE + UK + US**: standard di default del venditore (IT → fatturapa, altri →
-ubl), pattern strutturali del tax-id (P.IVA VIES per l'UE, VAT Reg. GB, **EIN**
-US), schema d'imposta (VAT / **STT** sales tax) e regole di validazione
+UE + UK + Svizzera + US**: standard di default del venditore, **validazione del
+tax-id con check digit** dove esiste, **aliquote IVA note**, **regime di
+e-invoicing** (rete, obbligo B2G/B2B, CIUS nazionale) e regole di validazione
 per-paese — i vincoli italiani (RegimeFiscale, CodiceDestinatario, CAP, Natura)
 si applicano SOLO ai venditori IT, quindi lo stesso `Invoice` neutro valida
-anche per un venditore tedesco, britannico o americano.
+anche per un venditore tedesco, britannico, svizzero o americano.
 
-**Regno Unito** — fattura UBL EN 16931 con VAT GB (nessun obbligo e-invoice:
-MTD copre i registri IVA); Peppol via EAS 9932.
+**Svizzera** — profilo `CH` completo: UID **CHE con check digit**, EAS Peppol
+**0183** (l'identificativo si usa così com'è, ha già il suo prefisso `CHE`),
+CHF, aliquote 8.1 / 3.8 / 2.6. Fuori dall'UE: nessuna cessione
+intracomunitaria, e le `Natura` italiane sono rifiutate perché descrivono un
+regime IVA che in Svizzera non esiste. B2G obbligatorio sopra CHF 5'000; il
+**QR-bill è uno standard di pagamento**, non di fatturazione, e resta separato.
 
-**Stati Uniti** — fattura UBL in stile EN 16931 con **sales tax** (UN/ECE 5153
-`STT`), EIN come identificativo (senza prefisso), nessuna Natura IVA ammessa;
-pronta per l'interscambio DBNAlliance.
+**Regno Unito** — fattura UBL EN 16931 con VAT GB **verificata (mod-97)**;
+nessun obbligo e-invoice (MTD copre i registri IVA); Peppol via EAS 9932.
+
+**Stati Uniti** — fattura UBL/CII in stile EN 16931 con **sales tax** (UN/ECE
+5153 `STT`), EIN come identificativo (prefisso di campus verificato), nessuna
+Natura IVA ammessa; pronta per l'interscambio DBNAlliance.
+
+**Dove NON basta questo pacchetto** — e lo dice invece di implicarlo: Polonia
+(KSeF vuole il formato nazionale FA(2)) e Spagna (FACe vuole Facturae 3.2.x)
+richiedono sintassi che qui non generiamo. `profile_for("PL").regime.national_format`
+lo dichiara, e `covered_by_this_package` è `False`. Ungheria e Grecia hanno
+adempimenti di *reporting* (NAV RTIR, myDATA) separati dalla fattura.
 
 ## Installazione
 
@@ -96,26 +119,208 @@ xml_it = build_fattura_xml(inv)   # FatturaPA (SdI)
 xml_eu = build_ubl_xml(inv)       # UBL Peppol BIS (EN 16931)
 ```
 
-## Uso 2 — profili paese (UE / UK / US)
+## Uso 2 — profili paese (UE / UK / CH / US)
 
 ```python
 from einvoice import profile_for, renderer_for_country, validate_tax_id
 
-validate_tax_id("DE", "DE811193231")      # True (VIES strutturale)
-validate_tax_id("US", "12-3456789")       # True (EIN)
+validate_tax_id("DE", "DE 136 695 976")      # True — check digit verificato
+validate_tax_id("DE", "DE136695977")         # False — una cifra sbagliata
+validate_tax_id("CH", "CHE-116.281.710 MWST")  # True — forma stampata accettata
 
-renderer_for_country("IT")                    # FatturaPARenderer
-renderer_for_country("DE", xrechnung=True)    # UBL con CIUS XRechnung 3.0
-renderer_for_country("US")                    # UBL con TaxScheme STT (sales tax)
+renderer_for_country("IT")                     # FatturaPA
+renderer_for_country("DE", b2g=True)           # UBL con CIUS XRechnung 3.0
+renderer_for_country("NL", b2g=True)           # UBL con NLCIUS
+renderer_for_country("FR", standard="cii")     # CII / Factur-X per Chorus Pro
+renderer_for_country("US")                     # UBL con TaxScheme STT
 
-profile_for("GB").notes                   # note operative per paese
+ch = profile_for("CH")
+ch.tax_id_validation        # "checksum"  (oppure "structural": lo dichiara)
+ch.vat_rates                # ("8.1", "3.8", "2.6", "0")
+ch.regime.b2g               # "mandatory"
+ch.regime.covered_by_this_package   # True
 ```
 
-`Invoice.validate()` applica automaticamente le regole del paese del venditore:
-un venditore US con righe a sales tax valida senza Nature/RegimeFiscale; un
-venditore IT resta vincolato a tutte le regole SdI.
+### Aliquote per categoria di prodotto
 
-## Uso 3 — motore (render + invio + stato)
+Un paese non ha «un'aliquota»: quale si applica dipende da cosa vendi.
+
+```python
+from einvoice import ProductCategory, rate_for
+
+rate_for("IT", ProductCategory.BOOKS)                # Decimal("4")
+rate_for("DE", ProductCategory.BOOKS)                # Decimal("7")
+rate_for("GB", ProductCategory.CHILDRENS_CLOTHING)   # Decimal("0")
+rate_for("BG", ProductCategory.HAIRDRESSING)         # None — non lo sappiamo
+```
+
+Dichiarando `LineItem(..., category=ProductCategory.BOOKS)` — campo opzionale,
+che non finisce in nessun XML — `check()` confronta l'aliquota usata con quella
+del paese e segnala la discrepanza.
+
+Le **regole non-aliquota** stanno in `profile.fiscal_rules`: anni di
+conservazione, soglia della fattura semplificata, termine di emissione,
+reverse charge interno. Dettagli e avvertenze in [docs/TAXES.md](docs/TAXES.md).
+
+`Invoice.validate()` applica le regole del paese del venditore: un venditore US
+o svizzero valida senza Nature/RegimeFiscale; un venditore IT resta vincolato a
+tutte le regole SdI.
+
+### Note di credito e resi
+
+Gli importi di una nota di credito sono **positivi**: il verso lo dà il tipo
+documento, non il segno. UBL mette le note di credito su una **radice separata**
+(`CreditNote`, con `cac:CreditNoteLine`), e il pacchetto la sceglie da sé.
+
+```python
+Invoice(document_type=DocumentType.CREDIT_NOTE,
+        lines=[LineItem("Reso 2 di 10", 2, Decimal("100"), 22)],   # positivi
+        references=[DocumentReference("invoice", "FT-9", date(2026, 7, 1))], …)
+```
+
+Un reso si può anche compensare con una **riga negativa** sulla fattura
+successiva — forma altrettanto valida, e non è una rettifica. Dettagli, famiglia
+semplificata (`TD07`/`TD08`/`TD09`) e i due rilievi che `check()` produce:
+[docs/CORRECTIONS.md](docs/CORRECTIONS.md).
+
+### `validate()` vs `check()`
+
+Due livelli, e la distinzione è deliberata.
+
+```python
+invoice.validate()   # solleva: il documento è SBAGLIATO
+for finding in invoice.check():
+    print(finding)   # non solleva: il documento è SOSPETTO
+    # [intra_eu_vat] Cessione intracomunitaria DE→FR con IVA esposta su 1 riga/e…
+```
+
+`validate()` blocca ciò che rende il documento invalido. `check()` segnala ciò
+che merita un occhio umano — un'aliquota che quel paese non usa (2,2 al posto di
+22), una cessione intra-UE con IVA esposta, un'esportazione tassata, un
+committente estero senza partita IVA, una scadenza anteriore alla data, una nota
+di credito con totale negativo o senza la fattura che rettifica.
+Rifiutare questi casi bloccherebbe fatture legittime, quindi `check()` non
+solleva mai e non impedisce il rendering.
+
+### Validazione dei tax-id: cosa garantiamo davvero
+
+Il **check digit è verificato per 20 paesi** (AT BE CH DE DK EE FI FR GB GR HR
+HU IE IT LU PL PT SE SI SK): un refuso viene intercettato. Per gli altri la
+verifica è **strutturale** e il profilo lo dichiara —
+`profile.tax_id_validation` risponde `"checksum"` o `"structural"`. Nessuno dei
+due livelli prova che il numero *esista*: per quello serve una lookup VIES /
+HMRC / registro UID, cioè una chiamata di rete, deliberatamente fuori da questo
+pacchetto.
+
+Ogni algoritmo è ancorato in `tests/test_taxid.py` a un numero reale e
+pubblicato: **rifiutare la partita IVA di un cliente vero è molto peggio che
+accettare un refuso**, e quattro di questi algoritmi erano sbagliati al primo
+tentativo — quei test sono ciò che li ha smascherati.
+
+## Uso 3 — CII / Factur-X / ZUGFeRD (Francia, Germania)
+
+EN 16931 ammette **due** sintassi e un destinatario ne accetta una sola: chi
+parla solo UBL non può servire Chorus Pro né ZUGFeRD.
+
+```python
+from einvoice import build_cii_xml
+from einvoice.formats import get_renderer
+
+xml = build_cii_xml(inv)                          # profilo EN 16931 ("COMFORT")
+get_renderer("cii", profile="extended").render(inv)
+get_renderer("cii", profile="xrechnung").render(inv)   # XRechnung su CII
+get_renderer("zugferd").render(inv)               # alias: ZUGFeRD È CII
+```
+
+Profili in `FACTURX_PROFILES`: `minimum`, `basicwl`, `basic`, `en16931`,
+`extended`, `xrechnung`. UBL e CII producono **gli stessi totali** — è una
+proprietà verificata su tutti e 30 i paesi in `tests/test_all_countries.py`.
+
+> **Limite dichiarato**: qui si genera l'**XML**. *Factur-X* propriamente detto è
+> quell'XML incorporato in un PDF/A-3; l'incapsulamento richiede un toolkit PDF
+> ed è un confine deliberato di questo pacchetto.
+
+## Uso 4 — leggere una fattura ricevuta
+
+Metà di ogni integrazione, e ormai la metà obbligatoria: la Germania impone di
+**accettare** fatture strutturate dal 2025-01-01, la Francia da tutti nel 2026,
+l'Italia da anni. Non si è conformi solo emettendo.
+
+```python
+from einvoice import parse_invoice, detect_standard, compare_declared_totals
+
+detect_standard(xml)          # 'fatturapa' | 'ubl' | 'cii', dalla radice
+inv = parse_invoice(xml)      # → Invoice neutro, qualunque fosse il formato
+inv.seller.vat_number
+inv.total_document()          # RICALCOLATO dalle righe, non letto dal documento
+```
+
+**I totali si ricalcolano, non si credono.** Un documento ricevuto dichiara i
+propri totali; qui si estraggono le **righe** e si lascia che sia `Invoice` a
+derivare gli importi, esattamente come per una fattura in uscita. Così una
+divergenza fra quello che il fornitore afferma e quello che le sue stesse righe
+producono si **vede**, invece di entrare in contabilità come un fatto:
+
+```python
+r = compare_declared_totals(xml)
+if r["difference"]:
+    ...   # dichiarato 9999.00, dalle righe 1220.00 → chiedere prima di pagare
+```
+
+```bash
+einvoice inspect ricevuta.xml    # chi, quanto, e se torna (exit 1 se non torna)
+einvoice parse   ricevuta.xml    # → JSON, riutilizzabile con validate/render
+```
+
+**Cosa sopravvive al viaggio.** Tutto ciò che EN 16931 modella: parti,
+indirizzi, identificativi fiscali, righe con quantità e aliquote, sconti,
+pagamenti, riferimenti, periodi. I blocchi italiani (ritenuta, cassa, bollo, e i
+sotto-codici `Natura`) tornano interi solo da **FatturaPA**, che ha elementi
+dedicati: attraverso UBL e CII arrivano come oneri generici, perché è tutto
+quello che quelle sintassi conservano. Una perdita **dichiarata**, non
+silenziosa — `N6.3` che diventa `N6.9` è documentato e testato.
+
+## Uso 5 — piattaforme di e-invoicing (Fiscozen, DATEV, Storecove, …)
+
+Un preset raccoglie in un posto solo trasporto, credenziali e formato di una
+piattaforma:
+
+```python
+from einvoice import (transport_for_provider, preset_for,
+                      providers_for_country, providers_of_kind)
+
+t = transport_for_provider("fiscozen", api_key="…", base_url="https://…")
+await t.transmit(rendered, invoice)
+
+preset_for("fiscozen").renderer            # "fatturapa" — SdI non prende UBL
+preset_for("fiscozen").endpoints_verified  # False → conferma i path sul contratto
+[p.key for p in providers_for_country("IT")]
+[p.key for p in providers_for_country("FR", kind="national_portal")]
+[p.key for p in providers_of_kind("accounting_platform")]
+```
+
+**65 preset**, in cinque categorie (`einvoice providers --kinds`):
+
+| Categoria | N | Esempi |
+|---|---:|---|
+| `access_point` | 18 | Storecove, Pagero, Tickstar, Billit, Logiq, Maventa, Qvalia, Conextrade |
+| `compliance_suite` | 16 | Sovos, Avalara, Vertex, Fonoa, SNI, EDICOM, Esker, Seeburger, Voxel |
+| `accounting_platform` | 13 | **DATEV**, Visma, Sage, Cegid, Pennylane, Bexio, Exact, Passepartout |
+| `sdi_intermediary` | 11 | **Fiscozen**, Aruba, Fatture in Cloud, Zucchetti, InfoCert, Credemtel |
+| `national_portal` | 7 | Chorus Pro (FR), KSeF (PL), e-Factura (RO), FACe (ES), Digipoort (NL), Nemhandel (DK), eBill (CH) |
+
+Un preset dichiara anche i **mercati** che copre (più d'uno: B2Brouter serve
+ES *e* IT, e si trova cercando l'uno o l'altro) e cosa **sa fare**
+(`send` / `status` / `receive`).
+
+Ogni preset dichiara `endpoints_verified`. **`True`** solo dove il flusso è
+implementato su contratto pubblico e coperto dai test (oggi: Aruba, Fatture in
+Cloud). Altrimenti la *forma* è giusta — questo trasporto, queste credenziali —
+ma i path vanno confermati sulla documentazione del tuo account, ed è per questo
+che quasi tutti chiedono `base_url`. Un preset che sembrasse integrato senza
+essere mai stato chiamato sarebbe peggio di nessun preset.
+
+## Uso 6 — motore (render + invio + stato)
 
 ```python
 from einvoice import EInvoiceEngine
@@ -135,7 +340,7 @@ result.lifecycle.audit_trail()    # storia immutabile per audit
 Cambiare formato o canale = cambiare una stringa. Le notifiche asincrone (esiti)
 avanzano la stessa macchina a stati: `lifecycle.apply(notification)`.
 
-## Uso 4 — JSON e riga di comando
+## Uso 7 — JSON e riga di comando
 
 Il modello è il confine d'integrazione: una piattaforma ci mappa sopra le sue
 tabelle. `einvoice.serde` dà a quel modello **una forma JSON portabile**, così
@@ -156,13 +361,22 @@ esatto — `lines[1].unit_price` — invece di fallire genericamente.
 
 ```bash
 einvoice validate fattura.json          # valida + stampa i totali
+einvoice check fattura.json             # rilievi non bloccanti (--strict per exit 1)
+einvoice inspect ricevuta.xml           # riepiloga un documento RICEVUTO (exit 1 se i conti non tornano)
+einvoice parse   ricevuta.xml -o x.json # XML ricevuto → JSON
 einvoice totals fattura.json            # riepiloghi IVA calcolati (JSON)
 einvoice render fattura.json -o IT.xml  # FatturaPA
 einvoice render fattura.json --country DE --xrechnung
+einvoice render fattura.json --standard cii -o FR.xml   # Factur-X / Chorus Pro
 einvoice normalize fattura.json         # forma canonica, per diffare fixture
 einvoice sign IT.xml --p12 cert.p12 --passphrase ...
-einvoice countries IT --tax-id 01234567890
-einvoice transports                     # canali disponibili
+einvoice countries                      # tutti i paesi: standard, obblighi, forza della verifica
+einvoice countries CH --tax-id CHE-116.281.710
+einvoice providers --kinds              # le cinque categorie
+einvoice providers --country IT         # piattaforme per mercato
+einvoice providers --kind national_portal
+einvoice providers fiscozen             # dettaglio: credenziali, renderer, verificato?
+einvoice transports / renderers
 ```
 
 Serve a controllare la risposta del motore contro le attese di un
@@ -179,6 +393,52 @@ p7m = sign_cades(xml_it, p12_bytes, passphrase)   # .p7m attached, SHA-256
 zip_bytes = build_conservation_package(documents) # ZIP + manifest + pdd_index
 ```
 
+### Controllare il certificato **prima** di usarlo
+
+Un certificato scaduto si apre benissimo, firma benissimo, e il documento
+viene rifiutato a valle. `inspect_p12()` legge l'archivio senza firmare nulla,
+così una configurazione sbagliata è un errore di form e non una fattura
+respinta settimane dopo:
+
+```python
+from einvoice import SigningUnavailable, inspect_p12
+
+try:
+    cert = inspect_p12(p12_bytes, passphrase)
+except SigningUnavailable:
+    ...                      # qui non possiamo controllare: manca l'extra
+except ValueError:
+    ...                      # l'archivio o la passphrase sono sbagliati
+
+cert.subject                 # "CN=Studio Rossi,C=IT"
+cert.valid_until             # date(2027, 3, 14)
+cert.is_expired()            # False
+cert.expires_within(30)      # True → è ora di rinnovarlo
+```
+
+`SigningUnavailable` esiste per una ragione precisa: distingue «non posso
+controllare» da «questo certificato è rotto». Chi le collassa in un solo
+`except Exception` finisce per salvare come valido un archivio che non lo è.
+
+## Dati di riferimento per una UI
+
+Una piattaforma che espone il setup fiscale ha bisogno degli stessi dati in
+JSON. `einvoice.reference` li serve già pronti — nessun `Decimal`, nessuna
+`date`, niente `float`:
+
+```python
+from einvoice.reference import all_country_references, country_reference
+
+country_reference("DE")["tax_id_label"]   # "USt-IdNr." — come lo chiama il paese
+all_country_references()                   # tutti e 30, stessa forma
+```
+
+A differenza di `profile_for()`, che è permissivo apposta perché il rendering
+non deve mai fermarsi, `country_reference()` è **stretto**: un paese non
+supportato solleva `KeyError`. Una schermata di setup sta *chiedendo* quali
+sono le regole, e un profilo generico spacciato per quelle del Portogallo è
+una risposta sbagliata con la bandiera giusta.
+
 ## Documentazione
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — i 3 livelli, engine, stati, matrice EU, roadmap
@@ -187,6 +447,12 @@ zip_bytes = build_conservation_package(documents) # ZIP + manifest + pdd_index
 - [docs/FATTURAPA.md](docs/FATTURAPA.md) — mappatura IT, campi, codici
 - [docs/INTEGRATION.md](docs/INTEGRATION.md) — integrazione in una piattaforma
 - [docs/CLI.md](docs/CLI.md) — riga di comando e formato JSON (riferimento campi)
+- [docs/COUNTRIES.md](docs/COUNTRIES.md) — matrice paese per paese: formati, obblighi, tax-id
+- [docs/TAXES.md](docs/TAXES.md) — aliquote IVA **per categoria di prodotto** e regole fiscali (conservazione, soglie, termini)
+- [docs/PROVIDERS.md](docs/PROVIDERS.md) — le 65 piattaforme e come collegarne una nuova
+- [docs/PARSING.md](docs/PARSING.md) — leggere una fattura ricevuta: cosa sopravvive e cosa no
+- [docs/CORRECTIONS.md](docs/CORRECTIONS.md) — note di credito, note di debito e resi
+- [docs/SIGNING.md](docs/SIGNING.md) — firma CAdES, certificati, scadenze, conservazione
 - [CONTRIBUTING.md](CONTRIBUTING.md) — regole di progetto (core senza dipendenze, Decimal, profili paese)
 - [CHANGELOG.md](CHANGELOG.md) — cronologia versioni
 
@@ -194,7 +460,8 @@ zip_bytes = build_conservation_package(documents) # ZIP + manifest + pdd_index
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 157 test, ~1 s
+pytest -q          # 1618 test, ~1.7 s
+mypy               # pulito, ed è imposto in CI
 ruff check .
 ```
 
@@ -212,12 +479,23 @@ ruff check .
 - I pattern tax-id dei profili paese sono **strutturali** (formato VIES/EIN),
   non verificano il checksum né l'esistenza: per quello serve una lookup VIES /
   IRS.
-- I path API di **Aruba/Zucchetti/PEPPOL** hanno la struttura corretta ma vanno
-  confermati sul tuo account (override via `base_url`/`extra`, testa in sandbox).
-- **InfoCert, Notartel, Wolters Kluwer** e gli altri intermediari girano sul
+- I path API dei provider vanno **confermati sul tuo account**: solo Aruba e
+  Fatture in Cloud sono `endpoints_verified=True`. Gli altri girano sul
   `GenericHubTransport`, configurabile (`upload_path`, `content_field`,
-  `auth_scheme`, …): sono tutti la stessa forma REST con nomi diversi, e la
-  configurazione batte un modulo scritto contro un contratto che non possiamo
-  testare. Servono almeno `base_url` e una credenziale.
+  `auth_scheme`, …), perché sono tutti la stessa forma REST con nomi diversi e
+  la configurazione batte un modulo scritto contro un contratto non testabile.
+- **Polonia e Spagna non sono coperte** dal rendering: KSeF vuole FA(2) e FACe
+  vuole Facturae 3.2.x, sintassi nazionali che questo pacchetto non genera. I
+  profili lo dichiarano (`regime.national_format`), non lo lasciano scoprire in
+  produzione.
+- I **dati normativi** (obblighi, scadenze, reti) sono datati da
+  `MANDATES_VERIFIED_AS_OF` e sono **guida operativa, non consulenza legale**:
+  le regole si muovono, verificare presso l'autorità fiscale nazionale. Le parti
+  meccaniche (tax-id, aliquote, CIUS, regole di rendering) non invecchiano
+  allo stesso modo.
+- Le **aliquote IVA note** servono solo a `check()` come avviso: un'aliquota
+  fuori elenco non blocca nulla, perché regimi speciali e transitori esistono.
+- *Factur-X* completo = XML **dentro** un PDF/A-3. Qui si genera l'XML;
+  l'incapsulamento in PDF è fuori perimetro.
 
 MIT.

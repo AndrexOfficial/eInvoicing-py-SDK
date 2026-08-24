@@ -18,9 +18,9 @@ from einvoice.transport import TransportConfig, get_transport
 def _invoice():
     return Invoice(
         number="2026/0001", date=date(2026, 6, 5),
-        seller=Party(name="Trattoria da Mario", vat_number="01234567890",
+        seller=Party(name="Trattoria da Mario", vat_number="01234567897",
                      address=Address("Via Roma 1", "20100", "Milano", "MI")),
-        buyer=Party(name="ACME Srl", vat_number="09876543210",
+        buyer=Party(name="ACME Srl", vat_number="09876543217",
                     address=Address("Via Verdi 9", "00100", "Roma", "RM")),
         lines=[LineItem.from_gross("Cena", 1, Decimal("122.00"), 22)],
     )

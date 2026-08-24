@@ -4,16 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "einvoice"
-version = "0.4.0"
-description = "Standalone, reusable e-invoicing engine for Italy, the EU, the UK and the US: FatturaPA/SdI XML builder (full 1.2.2 code lists), UBL Peppol BIS 3.0 / EN 16931 renderer (Invoice + CreditNote, XRechnung CIUS, US sales-tax scheme), country profiles with tax-id validation (EU-27 + GB + US), CAdES (.p7m) signing, conservation-package export, provider connectors (FattureInCloud, Aruba, Zucchetti, Peppol AP, configurable REST hubs) + plain XML export."
+version = "0.5.0"
+description = "Standalone, reusable e-invoicing engine for the EU-27, the UK, Switzerland and the US: EN 16931 in both syntaxes (UBL Peppol BIS 3.0 and UN/CEFACT CII for Factur-X / ZUGFeRD / Chorus Pro) plus FatturaPA/SdI, national CIUS selection (XRechnung, NLCIUS, CIUS-RO), 30 country profiles with check-digit tax-id validation and e-invoicing regime data, CAdES (.p7m) signing, conservation export, and presets for 25 platforms (Fiscozen, Storecove, Aruba, FattureInCloud, Chorus Pro, …)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "einvoice contributors" }]
 keywords = [
     "fatturapa", "fatturazione-elettronica", "sdi", "e-invoice", "einvoicing",
-    "italy", "peppol", "ubl", "en16931", "europe", "xrechnung", "uk", "usa",
-    "cades", "p7m", "conservazione",
+    "italy", "peppol", "ubl", "cii", "en16931", "factur-x", "zugferd",
+    "europe", "xrechnung", "nlcius", "uk", "switzerland", "usa",
+    "cades", "p7m", "conservazione", "vat", "vies",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

@@ -20,6 +20,7 @@ import base64
 from pathlib import PurePosixPath
 from xml.etree import ElementTree as ET
 
+from ..errors import ValidationError
 from ..models import Invoice, Party
 from ..money import fmt2, fmt6, fmt_rate
 from ..naming import sdi_filename
@@ -53,7 +54,7 @@ def _anagrafica(parent: ET.Element, party: Party) -> None:
 
 
 def _sede(parent: ET.Element, party: Party) -> None:
-    a = party.address
+    a = party.postal_address
     sede = _el(parent, "Sede")
     _el(sede, "Indirizzo", a.street)
     if a.country != "IT" and not (len(a.postcode) == 5 and a.postcode.isdigit()):
@@ -105,6 +106,17 @@ def build_fattura_xml(
     _anagrafica(cd, invoice.seller)
     _el(cd, "RegimeFiscale", invoice.seller.tax_regime)
     _sede(cedente, invoice.seller)
+    # IscrizioneREA and Contatti come after Sede in the schema sequence.
+    if invoice.seller.registration_number:
+        rea = _el(cedente, "IscrizioneREA")
+        # The REA is printed as "MI-123456": province before the number.
+        province, _, number = invoice.seller.registration_number.partition("-")
+        _el(rea, "Ufficio", province)
+        _el(rea, "NumeroREA", number or province)
+        _el(rea, "StatoLiquidazione", "LN")
+    if invoice.seller.email or invoice.seller.pec:
+        contatti = _el(cedente, "Contatti")
+        _el(contatti, "Email", invoice.seller.email or invoice.seller.pec)
 
     cess = _el(header, "CessionarioCommittente")
     bd = _el(cess, "DatiAnagrafici")
@@ -116,6 +128,12 @@ def build_fattura_xml(
         _el(bd, "CodiceFiscale", invoice.buyer.tax_code)
     _anagrafica(bd, invoice.buyer)
     _sede(cess, invoice.buyer)
+    if invoice.buyer.email:
+        _el(_el(cess, "Contatti"), "Email", invoice.buyer.email)
+    # BT-10 (BuyerReference) has no home in DatiGeneraliDocumento; the Italian
+    # CIUS puts it here, and it is what the buyer's AP system matches on.
+    if invoice.buyer_reference:
+        _el(cess, "RiferimentoAmministrazione", invoice.buyer_reference)
 
     # ── Body ──────────────────────────────────────────────────────────
     body = _el(root, "FatturaElettronicaBody")
@@ -164,8 +182,8 @@ def build_fattura_xml(
         if not tag:
             continue
         rb = _el(generali, tag)
-        for ln in ref.line_numbers:
-            _el(rb, "RiferimentoNumeroLinea", ln)
+        for line_no in ref.line_numbers:
+            _el(rb, "RiferimentoNumeroLinea", line_no)
         _el(rb, "IdDocumento", ref.doc_id)
         if ref.date:
             _el(rb, "Data", ref.date.isoformat())
@@ -218,7 +236,14 @@ def build_fattura_xml(
             amount = p.amount if p.amount is not None else invoice.total_payable()
             _el(det, "ImportoPagamento", fmt2(amount))
             if p.account and p.account.iban:
+                # Schema order: Beneficiario, IstitutoFinanziario, IBAN, …, BIC.
+                if p.account.holder:
+                    _el(det, "Beneficiario", p.account.holder)
+                if p.account.bank_name:
+                    _el(det, "IstitutoFinanziario", p.account.bank_name)
                 _el(det, "IBAN", p.account.iban)
+                if p.account.bic:
+                    _el(det, "BIC", p.account.bic)
 
     for att in invoice.attachments:
         a = _el(body, "Allegati")
@@ -246,7 +271,17 @@ class FatturaPARenderer(InvoiceRenderer):
         xml = build_fattura_xml(
             invoice, progressivo_invio=self.progressivo_invio, transmitter=self.transmitter
         )
+        # An IT seller always has a P.IVA (the profile enforces it), but this
+        # renderer can be selected explicitly for a foreign seller — and a
+        # missing number used to be stringified straight into the name as
+        # "ITNone_00001.xml".
+        seller_id = invoice.seller.normalized_vat() or invoice.seller.tax_code
+        if not seller_id:
+            raise ValidationError(
+                "FatturaPA: il cedente deve avere P.IVA o codice fiscale per "
+                "comporre il nome file di trasmissione SdI"
+            )
         filename = sdi_filename(
-            invoice.seller.country_code, invoice.seller.vat_number, self.progressivo_invio
+            invoice.seller.country_code, seller_id, self.progressivo_invio
         )
         return RenderedDocument("fatturapa", xml, "application/xml", filename)

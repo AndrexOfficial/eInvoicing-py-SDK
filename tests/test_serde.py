@@ -31,11 +31,11 @@ MINIMAL = {
     "number": "2026/0001",
     "date": "2026-06-05",
     "seller": {
-        "name": "Trattoria da Mario", "vat_number": "01234567890",
+        "name": "Trattoria da Mario", "vat_number": "01234567897",
         "address": {"street": "Via Roma 1", "postcode": "20100", "city": "Milano", "province": "MI"},
     },
     "buyer": {
-        "name": "ACME Srl", "vat_number": "09876543210",
+        "name": "ACME Srl", "vat_number": "09876543217",
         "address": {"street": "Via Verdi 9", "postcode": "00100", "city": "Roma", "province": "RM"},
     },
     "lines": [{"description": "Cena", "quantity": "1", "unit_price": "100.00", "vat_rate": "22"}],
@@ -47,7 +47,7 @@ def _rich_invoice() -> Invoice:
     return Invoice(
         number="2026/0099",
         date=date(2026, 6, 5),
-        seller=Party(name="Studio Rossi", vat_number="01234567890", tax_regime="RF19",
+        seller=Party(name="Studio Rossi", vat_number="01234567897", tax_regime="RF19",
                      address=Address("Via Roma 1", "20100", "Milano", "MI")),
         buyer=Party(first_name="Anna", last_name="Bianchi", tax_code="BNCNNA80A41H501Z",
                     pec="anna@pec.it",

@@ -37,6 +37,18 @@ class ProviderError(EInvoiceError):
 TransportError = ProviderError
 
 
+class SigningUnavailable(EInvoiceError, RuntimeError):
+    """Signing was requested but the ``[signing]`` extra is not installed.
+
+    Inherits :class:`RuntimeError` as well, because that is what this module
+    raised before the class existed and callers already catch it.
+
+    It exists so a platform can tell "we cannot check this certificate here"
+    apart from "this certificate is bad" — collapsing the two into one bare
+    ``except Exception`` is how a corrupt P12 gets stored as if it were fine.
+    """
+
+
 class RenderError(EInvoiceError):
     """A country/format renderer could not produce the document."""
 

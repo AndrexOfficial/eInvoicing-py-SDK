@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # The package itself has no runtime dependencies, so the only things that can
+  # drift are the Actions the workflow pins and the dev tools.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: deps
+    # Never let a bot widen the runtime dependency set: the zero-dependency
+    # core is a property of this package, not an accident to be updated away.
+    allow:
+      - dependency-type: development

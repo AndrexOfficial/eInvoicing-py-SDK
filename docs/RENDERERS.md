@@ -22,10 +22,35 @@ class InvoiceRenderer(ABC):
 | Standard | Classe | Uso |
 |---|---|---|
 | `fatturapa` | `FatturaPARenderer` | Italia / SdI (FatturaPA 1.2). Vedi [FATTURAPA.md](FATTURAPA.md). |
-| `ubl` / `peppol` | `UblRenderer` | UBL 2.1 **Peppol BIS Billing 3.0** (EN 16931). Europa / PA / cross-border. |
+| `ubl` / `peppol` | `UblRenderer` | UBL 2.1 **Peppol BIS Billing 3.0** (EN 16931) + CIUS nazionali. |
+| `cii` / `facturx` / `zugferd` | `CiiRenderer` | UN/CEFACT **Cross Industry Invoice** (EN 16931): Factur-X, ZUGFeRD, Chorus Pro. |
 
-`build_fattura_xml(invoice)` e `build_ubl_xml(invoice)` sono le funzioni dirette
-(ritornano `bytes`) se non ti serve l'oggetto `RenderedDocument`.
+`build_fattura_xml(invoice)`, `build_ubl_xml(invoice)` e `build_cii_xml(invoice)`
+sono le funzioni dirette (ritornano `bytes`) se non ti serve l'oggetto
+`RenderedDocument`.
+
+### Note di credito: radici diverse, non solo codici diversi
+
+UBL 2.1 ha uno **schema separato** per le note di credito: radice `CreditNote`,
+`cac:CreditNoteLine`, `cbc:CreditedQuantity`, e **niente** `cbc:DueDate` a
+livello documento. Emettere una radice `Invoice` con `InvoiceTypeCode` 381
+produce un documento che nessun destinatario Peppol accetta.
+
+CII invece ha una radice sola e cambia solo il `TypeCode`. FatturaPA usa
+`TipoDocumento`. In tutti e tre i casi la scelta la fa
+`DocumentType.is_credit_note` — che copre `TD04` **e** `TD08`. Dettagli in
+[CORRECTIONS.md](CORRECTIONS.md).
+
+### Perché due sintassi EN 16931
+
+EN 16931 è un modello **semantico**, e ammette due sintassi: UBL e CII. Portano
+lo stesso significato ma non sono intercambiabili sul filo — un destinatario ne
+accetta una sola. La Francia e ZUGFeRD scambiano CII; il grosso di Peppol
+scambia UBL. Coprire solo UBL avrebbe lasciato fuori Chorus Pro e ZUGFeRD.
+
+I due renderer producono **gli stessi totali**: è una proprietà verificata su
+tutti e 30 i paesi in `tests/test_all_countries.py`, e una divergenza fra loro
+è sempre un bug.
 
 ## UBL / EN 16931 (Peppol BIS 3.0)
 
@@ -75,30 +100,62 @@ class InvoiceRenderer(ABC):
   `InvoicedQuantity/@unitCode` passa `unit_of_measure` così com'è (default
   `C62`) — per output Peppol valido deve essere un codice UNECE Rec. 20.
 
-## Profili paese (`einvoice.countries`) — UE-27 + UK + US
+## CII / Factur-X / ZUGFeRD
 
-Il modulo `countries` collega paese del venditore → formato/regole:
+`CiiRenderer` emette `rsm:CrossIndustryInvoice` (D16B). Il **profilo** dichiara
+quale insieme di regole il documento segue:
 
-- `profile_for("DE")` → `CountryProfile` con `default_standard` ("fatturapa"
-  per IT, "ubl" altrove), `tax_scheme` ("VAT" UE/UK, **"STT"** US — UN/ECE 5153
-  sales tax), `tax_id_pattern` strutturale (P.IVA VIES, VAT GB, EIN US),
-  `currency_hint` e note operative.
-- `validate_tax_id("NL", "NL123456789B01")` — check strutturale del tax-id
-  (prefisso paese/EL tollerato, spazi ignorati). Nessun checksum/VIES lookup.
-- `renderer_for_country("DE", xrechnung=True)` — il renderer giusto per il
-  paese: FatturaPA per IT, UBL Peppol BIS per il resto; `xrechnung=True` usa il
-  CIUS XRechnung 3.0 (costante `XRECHNUNG_CUSTOMIZATION`); per US imposta
-  `tax_scheme="STT"` automaticamente.
-- `Invoice.validate()` delega al profilo del paese del **venditore**: le regole
-  italiane (RegimeFiscale, CodiceDestinatario FPA12/FPR12, CAP, Natura ↔
-  aliquota) valgono solo per venditori IT; il profilo US **rifiuta** le Nature
-  IVA; ogni profilo verifica la struttura del tax-id del venditore.
-- `PEPPOL_EAS_BY_COUNTRY` copre tutta l'UE + GB (9932); la Grecia usa il
-  prefisso VIES `EL` sia nel `CompanyID` che nell'`EndpointID` (EAS 9933).
+```python
+get_renderer("cii")                          # en16931 ("COMFORT") — default
+get_renderer("cii", profile="extended")
+get_renderer("cii", profile="xrechnung")     # XRechnung su sintassi CII
+get_renderer("cii", guideline="urn:…")       # identificativo esplicito
+```
 
-`UblRenderer(tax_scheme=...)` propaga lo schema a `PartyTaxScheme`,
-`TaxCategory`/`ClassifiedTaxCategory` e `AllowanceCharge`; per gli USA il
-`CompanyID` è l'EIN senza prefisso.
+Profili in `FACTURX_PROFILES`: `minimum`, `basicwl`, `basic`, `en16931`,
+`extended`, `xrechnung`.
+
+Due cose su cui è facile sbagliare, e che qui sono gestite:
+
+- **L'ordine degli elementi è vincolante.** Lo schema CII è una sequenza:
+  emettere `ram:Name` prima di `ram:ID` produce un documento semanticamente
+  giusto e **non valido**. È il motivo per cui il modulo è scritto in linea
+  retta invece che con helper che "aggiungono un campo dove capita".
+- **Le date sono incapsulate**: `<ram:IssueDateTime><udt:DateTimeString
+  format="102">20260824</udt:DateTimeString></ram:IssueDateTime>`, mai una
+  stringa ISO nuda. Idem il booleano di `ram:ChargeIndicator`, che vive in un
+  `udt:Indicator` annidato.
+
+**Fuori perimetro**: qui si genera l'XML. *Factur-X* propriamente detto è
+quell'XML incorporato in un **PDF/A-3**; l'incapsulamento richiede un toolkit
+PDF ed è un confine deliberato.
+
+## Profili paese (`einvoice.countries`) — UE-27 + UK + CH + US
+
+Il modulo `countries` collega paese del venditore → formato, regole e obblighi.
+La matrice completa è in [COUNTRIES.md](COUNTRIES.md).
+
+- `profile_for("CH")` → `CountryProfile` con `default_standard`, `tax_scheme`
+  ("VAT" UE/UK/CH, **"STT"** US), `vat_rates` note, `currency_hint`,
+  `tax_id_validation` (`"checksum"` o `"structural"`) e `regime`
+  (:class:`EInvoicingRegime`: rete, obbligo B2G/B2B, CIUS, formato nazionale).
+- `validate_tax_id("DE", "DE 136 695 976")` — **cifra di controllo verificata**
+  per 20 paesi, strutturale per gli altri, con le forme stampate normalizzate.
+- `renderer_for_country(code, b2g=True)` — il renderer giusto **e il CIUS
+  giusto**: XRechnung (DE), NLCIUS (NL), CIUS-RO (RO). Mandare Peppol BIS liscio
+  a chi si aspetta un CIUS è uno scarto, non un avviso. `standard="cii"` forza
+  la sintassi CII; per gli US imposta `tax_scheme="STT"` da sé.
+- `Invoice.validate()` delega al profilo del **venditore**: le regole italiane
+  valgono solo per venditori IT; i profili US e CH **rifiutano** le Nature IVA
+  italiane; ogni profilo valida il tax-id del venditore.
+- `Invoice.check()` restituisce rilievi **non bloccanti** (aliquota implausibile,
+  cessione intra-UE con IVA, esportazione tassata, scadenza anteriore…).
+- `PEPPOL_EAS_BY_COUNTRY` copre UE + GB (9932) + **CH (0183)**. La Grecia usa il
+  prefisso VIES `EL`; la Svizzera **non** viene prefissata, perché l'UID porta
+  già il suo `CHE`.
+
+`UblRenderer(tax_scheme=...)` e `CiiRenderer(tax_scheme=...)` propagano lo
+schema d'imposta a tutti i blocchi fiscali.
 
 ## Aggiungere un formato (es. XRechnung / CII)
 
@@ -116,6 +173,6 @@ class XRechnungRenderer(InvoiceRenderer):
 register_renderer("xrechnung", XRechnungRenderer)
 ```
 
-Per **CII** (UN/CEFACT, base di Factur-X/ZUGFeRD) si scrive un renderer analogo
-sulla sintassi `CrossIndustryInvoice`; **Factur-X/ZUGFeRD** aggiungono poi un
-passo di embedding del CII XML in un PDF/A-3 (estensione lato rendering/PDF).
+**CII è ora incluso** (`einvoice.formats.cii`) — l'esempio sopra resta valido
+per un CIUS su UBL. Per Factur-X/ZUGFeRD completi manca solo l'embedding
+dell'XML in un PDF/A-3, che richiede un toolkit PDF.

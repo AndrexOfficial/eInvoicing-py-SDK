@@ -3,7 +3,10 @@ from einvoice import REGIMI_FISCALI, DocumentType, PaymentMeans, VatExigibility,
 
 def test_document_type_complete_and_uncl1001_roundtrip():
     codes = {dt.value for dt in DocumentType}
-    expected = {f"TD{n:02d}" for n in (1, 2, 3, 4, 5, 6)} | {
+    # TD01–TD09 and TD16–TD28. The "semplificata" trio (TD07 fattura, TD08 nota
+    # di credito, TD09 nota di debito) was missing, which mattered most for
+    # TD08: a credit note the package did not know was one.
+    expected = {f"TD{n:02d}" for n in range(1, 10)} | {
         f"TD{n}" for n in range(16, 29)
     }
     assert codes == expected
@@ -19,9 +22,35 @@ def test_document_type_complete_and_uncl1001_roundtrip():
         assert DocumentType(td).uncl1001 == "380"
 
 
-def test_only_td04_is_credit_note():
-    assert DocumentType.CREDIT_NOTE.is_credit_note
-    assert not any(dt.is_credit_note for dt in DocumentType if dt.value != "TD04")
+def test_the_credit_notes_are_td04_and_td08():
+    """"Simplified" describes how little the buyer has to be identified, not
+    what the document does — TD08 reduces what is owed exactly as TD04 does,
+    and UBL puts both on the CreditNote root."""
+    credit = {dt.value for dt in DocumentType if dt.is_credit_note}
+    assert credit == {"TD04", "TD08"}
+
+
+def test_the_debit_notes_are_td05_and_td09():
+    debit = {dt.value for dt in DocumentType if dt.is_debit_note}
+    assert debit == {"TD05", "TD09"}
+
+
+def test_credit_and_debit_are_mutually_exclusive():
+    for dt in DocumentType:
+        assert not (dt.is_credit_note and dt.is_debit_note), dt
+
+
+def test_only_correcting_documents_reference_an_earlier_one():
+    correcting = {dt.value for dt in DocumentType if dt.corrects_an_earlier_document}
+    assert correcting == {"TD04", "TD05", "TD08", "TD09"}
+
+
+def test_the_simplified_family_maps_to_the_same_uncl_codes():
+    """A simplified document is the same kind of document to a foreign
+    receiver, which only sees the UNCL 1001 code."""
+    assert DocumentType.SIMPLIFIED_INVOICE.uncl1001 == "380"
+    assert DocumentType.SIMPLIFIED_CREDIT_NOTE.uncl1001 == "381"
+    assert DocumentType.SIMPLIFIED_DEBIT_NOTE.uncl1001 == "383"
 
 
 def test_legacy_self_invoice_alias():

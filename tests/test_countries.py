@@ -2,6 +2,7 @@
 renderer selection and the non-IT rendering paths."""
 from __future__ import annotations
 
+import re
 from datetime import date
 from decimal import Decimal
 
@@ -30,8 +31,12 @@ def _invoice(seller_country: str, vat: str, *, buyer_country: str = "DE",
         address=Address("Main St 1", "10115" if seller_country != "IT" else "20100",
                         "City", country=seller_country),
     )
+    # A buyer number that is valid in the country it is placed in — the buyer's
+    # id is advisory, not fatal, but a fixture should not model a broken one.
+    buyer_vat = {"DE": "136695976", "GB": "980780684", "US": "123456789",
+                 "IT": "07643520567", "GR": "094014249"}.get(buyer_country, "136695976")
     buyer = Party(
-        name="Buyer GmbH", vat_number="811193231", country_code=buyer_country,
+        name="Buyer GmbH", vat_number=buyer_vat, country_code=buyer_country,
         address=Address("Kaiserstr. 2", "60311", "Frankfurt", country=buyer_country),
     )
     line = LineItem("Consulting", Decimal("1"), Decimal("100"), Decimal("19"))
@@ -56,12 +61,15 @@ def test_registry_covers_eu27_uk_us():
 
 # ── tax-id validation ───────────────────────────────────────────────────────
 
+# Real, published identifiers. Made-up numbers used to pass here because the
+# check was a regex; now that the check digit is verified they no longer do,
+# which is the point — see tests/test_taxid.py for the full matrix.
 @pytest.mark.parametrize("country,good", [
-    ("IT", "01234567890"), ("DE", "811193231"), ("FR", "AB123456789"),
-    ("NL", "123456789B01"), ("IE", "1234567FA"), ("ES", "A1234567B"),
-    ("GR", "EL123456789"), ("SE", "123456789012"), ("BE", "0123456789"),
-    ("AT", "U12345678"), ("PL", "1234567890"), ("GB", "123456789"),
-    ("GB", "123456789012"), ("GB", "GD123"), ("US", "12-3456789"),
+    ("IT", "07643520567"), ("DE", "136695976"), ("FR", "40303265045"),
+    ("NL", "004495445B01"), ("IE", "6388047V"), ("ES", "A28015865"),
+    ("GR", "EL094014249"), ("SE", "556012579001"), ("BE", "0428759497"),
+    ("AT", "U13585627"), ("PL", "5260001246"), ("GB", "980780684"),
+    ("GB", "GD123"), ("CH", "CHE-116.281.710"), ("US", "12-3456789"),
     ("US", "123456789"),
 ])
 def test_tax_id_valid(country, good):
@@ -71,20 +79,37 @@ def test_tax_id_valid(country, good):
 @pytest.mark.parametrize("country,bad", [
     ("IT", "123"), ("DE", "12345678"), ("NL", "123456789"),
     ("GB", "12345"), ("US", "1234"), ("AT", "12345678"),
+    # Right shape, impossible arithmetic — a regex cannot tell these apart.
+    ("IT", "01234567890"), ("DE", "136695977"), ("CH", "CHE-116.281.711"),
 ])
 def test_tax_id_invalid(country, bad):
     assert not validate_tax_id(country, bad), f"{country}:{bad}"
 
 
-def test_tax_id_accepts_country_prefix_and_spaces():
-    assert validate_tax_id("DE", "DE 811 193 231")
-    assert validate_tax_id("IT", "IT01234567890")
-    assert validate_tax_id("GR", "EL123456789")
+def test_tax_id_accepts_printed_forms():
+    """Numbers arrive from humans: prefixed, spaced, dotted, suffixed."""
+    assert validate_tax_id("DE", "DE 136 695 976")
+    assert validate_tax_id("IT", "IT07643520567")
+    assert validate_tax_id("GR", "EL094014249")
+    assert validate_tax_id("CH", "CHE-116.281.710 MWST")
+    assert validate_tax_id("FR", "FR 40 303 265 045")
 
 
-def test_unknown_country_is_permissive():
-    assert profile_for("CH").tax_id_pattern is None
-    assert validate_tax_id("CH", "CHE-123.456.789")
+def test_switzerland_is_a_real_profile_now():
+    """It used to fall through to the permissive generic profile, which meant
+    any string passed as a Swiss VAT number."""
+    ch = profile_for("CH")
+    assert ch.code == "CH"
+    assert ch.currency_hint == "CHF"
+    assert ch.tax_id_validation == "checksum"
+    assert not ch.eu_member
+    assert not validate_tax_id("CH", "not-a-uid")
+
+
+def test_unknown_country_is_still_permissive():
+    generic = profile_for("ZZ")
+    assert generic.tax_id_pattern is None
+    assert validate_tax_id("ZZ", "whatever-they-use")
 
 
 # ── per-country invoice validation ─────────────────────────────────────────
@@ -101,7 +126,7 @@ def test_german_seller_zero_rate_needs_no_natura():
 
 
 def test_italian_seller_keeps_strict_rules():
-    inv = _invoice("IT", "01234567890", buyer_country="IT")
+    inv = _invoice("IT", "01234567897", buyer_country="IT")
     inv.buyer.address.postcode = "603"  # invalid CAP for IT buyer
     inv.buyer.address.country = "IT"
     with pytest.raises(ValidationError):
@@ -109,7 +134,7 @@ def test_italian_seller_keeps_strict_rules():
 
 
 def test_italian_zero_rate_still_requires_natura():
-    inv = _invoice("IT", "01234567890")
+    inv = _invoice("IT", "01234567897")
     inv.seller.address.postcode = "20100"
     inv.lines[0].vat_rate = Decimal("0")
     with pytest.raises(ValidationError, match="Natura"):
@@ -118,7 +143,9 @@ def test_italian_zero_rate_still_requires_natura():
 
 def test_seller_tax_id_structure_enforced():
     inv = _invoice("DE", "12345")  # malformed USt-IdNr.
-    with pytest.raises(ValidationError, match="VAT"):
+    # The message names the identifier the way the country does, so the
+    # operator recognises the field being complained about.
+    with pytest.raises(ValidationError, match=re.escape("USt-IdNr.")):
         inv.validate()
 
 
@@ -160,24 +187,25 @@ def test_us_invoice_renders_with_sales_tax_scheme():
     assert "<cbc:ID>STT</cbc:ID>" in xml
     assert "<cbc:ID>VAT</cbc:ID>" not in xml
     assert 'currencyID="USD"' in xml
-    # EIN goes through unprefixed
-    assert "<cbc:CompanyID>12-3456789</cbc:CompanyID>" in xml
+    # The EIN goes through unprefixed AND normalized: the printed dash is
+    # decoration, and a receiver matches on the exact string.
+    assert "<cbc:CompanyID>123456789</cbc:CompanyID>" in xml
 
 
 def test_uk_invoice_renders_with_gb_vat():
-    inv = _invoice("GB", "123456789", buyer_country="GB", currency="GBP")
-    inv.buyer.vat_number = "987654321"
+    inv = _invoice("GB", "980780684", buyer_country="GB", currency="GBP")
+    inv.buyer.vat_number = "553557881"
     xml = renderer_for_country("GB").render(inv).text()
-    assert "<cbc:CompanyID>GB123456789</cbc:CompanyID>" in xml
+    assert "<cbc:CompanyID>GB980780684</cbc:CompanyID>" in xml
     assert 'currencyID="GBP"' in xml
 
 
 def test_greek_vat_uses_el_prefix():
-    inv = _invoice("GR", "123456789")
+    inv = _invoice("GR", "094014249")
     xml = renderer_for_country("GR").render(inv).text()
-    assert "<cbc:CompanyID>EL123456789</cbc:CompanyID>" in xml
+    assert "<cbc:CompanyID>EL094014249</cbc:CompanyID>" in xml
     # Peppol endpoint derived with the EL prefix too (EAS 9933)
-    assert 'schemeID="9933"' in xml and ">EL123456789<" in xml
+    assert 'schemeID="9933"' in xml and ">EL094014249<" in xml
 
 
 def test_peppol_endpoint_all_eu_vat_schemes():

@@ -21,11 +21,17 @@ python -m einvoice --help   # equivalente, senza dipendere dal PATH
 | Comando | Cosa fa |
 |---|---|
 | `validate FILE` | Valida secondo le regole del paese del cedente e stampa i totali |
+| `check FILE` | Rilievi **non bloccanti** (aliquote, regimi, date). `--strict` per uscire con 1 |
+| `parse FILE` | Legge una fattura **ricevuta** (XML) e la restituisce in JSON (`--standard`, `-o`) |
+| `inspect FILE` | Riepiloga un documento ricevuto; esce **1** se il totale dichiarato contraddice le righe |
 | `totals FILE` | Riepiloghi IVA calcolati, in JSON |
 | `render FILE` | Genera l'XML (`--standard`, `--country`, `--xrechnung`, `-o`) |
 | `normalize FILE` | Riscrive il JSON in forma canonica |
 | `sign FILE.xml` | Firma CAdES `.p7m` (`--p12`, `--passphrase`, `-o`) |
-| `countries [CODE]` | Elenca o descrive i profili paese (`--tax-id` per verificarne uno) |
+| `countries [CODE]` | Elenca o descrive i profili paese: formato, rete, obblighi B2G/B2B, forza della validazione, aliquote (`--tax-id` per verificarne uno) |
+| `rates CC` | Aliquote IVA di un paese e cosa coprono (`--category` per una sola) |
+| `rules CC` | Obblighi non-aliquota: conservazione, soglie, termini, reverse charge |
+| `providers [KEY]` | Piattaforme di e-invoicing (`--country`, `--kind`, `--kinds`) |
 | `transports` / `renderers` | Elenca canali e formati registrati |
 
 `FILE` può essere `-` per leggere da stdin, così la CLI si compone in pipeline.
@@ -57,11 +63,28 @@ einvoice render fattura.json -o IT01234567890_00001.xml
 # Un cedente tedesco B2G: UBL con CIUS XRechnung, non FatturaPA
 einvoice render fattura-de.json --country DE --xrechnung
 
+# Un cedente francese: CII / Factur-X, la sintassi che Chorus Pro scambia
+einvoice render fattura-fr.json --standard cii -o FR.xml
+
+# Cosa merita un occhio umano prima di spedire
+einvoice check fattura.json
+
+# Cosa serve per un paese, e quali piattaforme lo servono
+einvoice countries CH
+einvoice providers --country CH
+einvoice providers --kinds
+
+# Il ciclo passivo: cosa è arrivato, e se i conti tornano
+einvoice inspect ricevuta.xml
+einvoice parse   ricevuta.xml -o ricevuta.json
+einvoice validate ricevuta.json
+
 # Firma qualificata
 einvoice sign IT01234567890_00001.xml --p12 firma.p12 --passphrase '…'
 
-# Verifica strutturale di una partita IVA
-einvoice countries DE --tax-id DE811193231
+# Verifica di una partita IVA — con cifra di controllo dove esiste
+einvoice countries DE --tax-id DE136695976
+einvoice countries CH --tax-id "CHE-116.281.710 MWST"
 ```
 
 ---
@@ -130,7 +153,7 @@ Tutti facoltativi; si impostano solo quando servono.
 
 | Campo | Tipo | Note |
 |---|---|---|
-| `document_type` | `"TD01"`…`"TD28"` | Default `TD01`. `TD04` = nota di credito |
+| `document_type` | `"TD01"`…`"TD28"` | Default `TD01`. `TD04`/`TD08` = nota di credito, `TD05`/`TD09` = nota di debito — vedi [CORRECTIONS.md](CORRECTIONS.md) |
 | `causale` | stringa | Causale del documento |
 | `currency` | stringa | Default `"EUR"` |
 | `payments[]` | `means`, `amount`, `due_date`, `condition`, `account{iban,bic,…}` | `means` = `MP01`…`MP23` |
@@ -147,7 +170,9 @@ Tutti facoltativi; si impostano solo quando servono.
 
 Righe: oltre a `description`/`quantity`/prezzo/`vat_rate` accettano
 `unit_of_measure`, `nature` (`N1`…`N7.x`, obbligatoria in Italia con aliquota 0),
-`article_code`, `period_start`/`period_end`, `exemption_reason`.
+`article_code`, `period_start`/`period_end`, `exemption_reason` e `category`
+(categoria merceologica: alimenta solo `check()`, non finisce in nessun XML —
+vedi [TAXES.md](TAXES.md)).
 
 ### Errori
 

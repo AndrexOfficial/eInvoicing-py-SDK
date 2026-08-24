@@ -27,12 +27,13 @@ Semantic mapping of the Italian-only blocks (documented contracts):
 """
 from __future__ import annotations
 
+import base64
 from decimal import Decimal
 from xml.etree import ElementTree as ET
 
 from ..models import Invoice, Party, VatNature
-from ..money import D, fmt2, q2
-from ..naming import sdi_filename
+from ..money import D, fmt2, fmt_price, q2
+from ..naming import safe_filename
 from .base import InvoiceRenderer, RenderedDocument
 
 INV_NS = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
@@ -82,21 +83,26 @@ def _tax_cat_el(parent: ET.Element, container: str, category: str,
     _e(_e(cat, "cac:TaxScheme"), "cbc:ID", tax_scheme)
 
 
-def _party(parent: ET.Element, party: Party, currency: str, tax_scheme: str = "VAT") -> None:
+def _party(parent: ET.Element, party: Party, tax_scheme: str = "VAT") -> None:
     p = _e(parent, "cac:Party")
     scheme, endpoint = party.peppol_endpoint()
     if scheme and endpoint:
         _e(p, "cbc:EndpointID", endpoint, schemeID=scheme)
-    if not party.vat_number and party.tax_code:
+    # BT-29: the party's own identifier. Emitted whenever there is a tax code,
+    # not only when the VAT number is absent — an Italian party routinely has
+    # both, and dropping the codice fiscale loses the one that identifies a
+    # natural person.
+    if party.tax_code:
         _e(_e(p, "cac:PartyIdentification"), "cbc:ID", party.tax_code)
+    addr_ = party.postal_address
     addr = _e(p, "cac:PostalAddress")
-    _e(addr, "cbc:StreetName", party.address.street)
-    _e(addr, "cbc:CityName", party.address.city)
-    _e(addr, "cbc:PostalZone", party.address.postcode)
-    if party.address.province:
-        _e(addr, "cbc:CountrySubentity", party.address.province)
+    _e(addr, "cbc:StreetName", addr_.street)
+    _e(addr, "cbc:CityName", addr_.city)
+    _e(addr, "cbc:PostalZone", addr_.postcode)
+    if addr_.province:
+        _e(addr, "cbc:CountrySubentity", addr_.province)
     country = _e(addr, "cac:Country")
-    _e(country, "cbc:IdentificationCode", party.address.country)
+    _e(country, "cbc:IdentificationCode", addr_.country)
     if party.vat_number:
         pts = _e(p, "cac:PartyTaxScheme")
         _e(pts, "cbc:CompanyID", party.tax_company_id())
@@ -105,6 +111,11 @@ def _party(parent: ET.Element, party: Party, currency: str, tax_scheme: str = "V
     _e(ple, "cbc:RegistrationName", party.display_name())
     if party.registration_number:
         _e(ple, "cbc:CompanyID", party.registration_number)
+    # BG-6 / BG-9 contact. The email is how a human chases a query about the
+    # invoice, and dropping it silently made the document less useful than the
+    # data it was built from. Sequence: Contact follows PartyLegalEntity.
+    if party.email or party.pec:
+        _e(_e(p, "cac:Contact"), "cbc:ElectronicMail", party.email or party.pec)
 
 
 def _allowance_charge(parent: ET.Element, *, is_charge: bool, amount, currency: str,
@@ -159,8 +170,31 @@ def build_ubl_xml(invoice: Invoice, *, customization: str = _CUSTOMIZATION,
     if order_ref is not None:
         _e(_e(root, "cac:OrderReference"), "cbc:ID", order_ref.doc_id)
 
-    _party(_e(root, "cac:AccountingSupplierParty"), invoice.seller, cur, tax_scheme)
-    _party(_e(root, "cac:AccountingCustomerParty"), invoice.buyer, cur, tax_scheme)
+    # Preceding invoice(s) — BG-3. EN 16931 BR-55 requires one on a credit
+    # note: without it the receiver cannot tell which invoice is being undone.
+    for ref in (r for r in invoice.references if r.kind == "invoice"):
+        br = _e(root, "cac:BillingReference")
+        idoc = _e(br, "cac:InvoiceDocumentReference")
+        _e(idoc, "cbc:ID", ref.doc_id)
+        if ref.date:
+            _e(idoc, "cbc:IssueDate", ref.date.isoformat())
+    for ref in (r for r in invoice.references if r.kind == "ddt"):
+        _e(_e(root, "cac:DespatchDocumentReference"), "cbc:ID", ref.doc_id)
+    for ref in (r for r in invoice.references if r.kind == "contract"):
+        _e(_e(root, "cac:ContractDocumentReference"), "cbc:ID", ref.doc_id)
+
+    # Attachments — BG-24. The bytes travel base64 inside the document.
+    for att in invoice.attachments:
+        adr = _e(root, "cac:AdditionalDocumentReference")
+        _e(adr, "cbc:ID", att.filename)
+        if att.description:
+            _e(adr, "cbc:DocumentDescription", att.description)
+        _e(_e(adr, "cac:Attachment"), "cbc:EmbeddedDocumentBinaryObject",
+           base64.b64encode(att.content).decode("ascii"),
+           mimeCode=att.mime, filename=att.filename)
+
+    _party(_e(root, "cac:AccountingSupplierParty"), invoice.seller, tax_scheme)
+    _party(_e(root, "cac:AccountingCustomerParty"), invoice.buyer, tax_scheme)
 
     if invoice.payments:
         pm = _e(root, "cac:PaymentMeans")
@@ -168,8 +202,13 @@ def build_ubl_xml(invoice: Invoice, *, customization: str = _CUSTOMIZATION,
         _e(pm, "cbc:PaymentID", invoice.number)
         acc = invoice.payments[0].account
         if acc and acc.iban:
+            # BT-84/85/86: account, holder, servicing bank.
             fa = _e(pm, "cac:PayeeFinancialAccount")
             _e(fa, "cbc:ID", acc.iban)
+            if acc.holder:
+                _e(fa, "cbc:Name", acc.holder)
+            if acc.bic:
+                _e(_e(fa, "cac:FinancialInstitutionBranch"), "cbc:ID", acc.bic)
     if invoice.payment_terms_note:
         _e(_e(root, "cac:PaymentTerms"), "cbc:Note", invoice.payment_terms_note)
 
@@ -259,13 +298,24 @@ def build_ubl_xml(invoice: Invoice, *, customization: str = _CUSTOMIZATION,
             if d.reason:
                 _e(lac, "cbc:AllowanceChargeReason", d.reason)
             _e(lac, "cbc:Amount", fmt2(d.amount), currencyID=cur)
+        # Accounting period the line covers — BG-26. Dropping it loses the
+        # only thing that distinguishes twelve identical subscription lines.
+        if ln.period_start or ln.period_end:
+            per = _e(line, "cac:InvoicePeriod")
+            if ln.period_start:
+                _e(per, "cbc:StartDate", ln.period_start.isoformat())
+            if ln.period_end:
+                _e(per, "cbc:EndDate", ln.period_end.isoformat())
         item = _e(line, "cac:Item")
         _e(item, "cbc:Name", ln.description)
+        if ln.article_code:
+            _e(_e(item, "cac:SellersItemIdentification"), "cbc:ID", ln.article_code)
         _tax_cat_el(item, "cac:ClassifiedTaxCategory",
                     _tax_category(ln.vat_rate, ln.nature), ln.vat_rate,
+                    reason=ln.exemption_reason if ln.vat_rate == 0 else None,
                     tax_scheme=tax_scheme)
         price = _e(line, "cac:Price")
-        _e(price, "cbc:PriceAmount", fmt2(ln.unit_price), currencyID=cur)
+        _e(price, "cbc:PriceAmount", fmt_price(ln.unit_price), currencyID=cur)
 
     ET.indent(root)
     return ET.tostring(root, encoding="UTF-8", xml_declaration=True)
@@ -281,7 +331,12 @@ class UblRenderer(InvoiceRenderer):
     def render(self, invoice: Invoice) -> RenderedDocument:
         xml = build_ubl_xml(invoice, customization=self.customization,
                             tax_scheme=self.tax_scheme)
-        filename = sdi_filename(
-            invoice.seller.country_code, invoice.seller.vat_number, "00001"
-        ).replace(".xml", "-ubl.xml")
+        # Peppol carries the payload, not a file, so this name is for humans
+        # and archives — it must simply always be valid.
+        filename = safe_filename(
+            invoice.seller.country_code,
+            invoice.seller.normalized_vat() or invoice.seller.tax_code,
+            invoice.number,
+            suffix="-ubl.xml",
+        )
         return RenderedDocument("ubl", xml, "application/xml", filename)

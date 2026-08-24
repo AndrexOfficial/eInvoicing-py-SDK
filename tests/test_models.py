@@ -17,12 +17,12 @@ from einvoice.errors import ValidationError
 
 
 def _seller():
-    return Party(name="Trattoria da Mario", vat_number="01234567890",
+    return Party(name="Trattoria da Mario", vat_number="01234567897",
                  address=Address("Via Roma 1", "20100", "Milano", "MI"))
 
 
 def _buyer():
-    return Party(name="ACME Srl", vat_number="09876543210",
+    return Party(name="ACME Srl", vat_number="09876543217",
                  address=Address("Via Verdi 9", "00100", "Roma", "RM"), sdi_code="ABCDEF1")
 
 
@@ -148,19 +148,25 @@ def test_resolved_recipient_foreign_buyer_xxxxxxx():
 
 
 def test_peppol_endpoint_derivation():
-    it = Party(name="X", vat_number="01234567890",
+    it = Party(name="X", vat_number="01234567897",
                address=Address("a", "20100", "Milano", "MI"))
-    assert it.peppol_endpoint() == ("0211", "IT01234567890")
+    assert it.peppol_endpoint() == ("0211", "IT01234567897")
     de = Party(name="Y", vat_number="123456789", country_code="DE",
                address=Address("b", "10115", "Berlin", None, "DE"))
     assert de.peppol_endpoint() == ("9930", "DE123456789")
-    ch = Party(name="Z", vat_number="999999999", country_code="CH",
+    # Switzerland: EAS 0183, and the UID is used AS-IS — it carries its own
+    # "CHE" prefix, so prefixing the country code again would be wrong.
+    ch = Party(name="Z", vat_number="CHE-116.281.710", country_code="CH",
                address=Address("c", "8000", "Zurigo", None, "CH"))
-    assert ch.peppol_endpoint() == (None, None)
-    explicit = Party(name="W", vat_number="01234567890",
-                     endpoint_scheme="9906", endpoint_id="IT01234567890",
+    assert ch.peppol_endpoint() == ("0183", "CHE116281710")
+    # A country with no EAS mapping still yields nothing to route on.
+    zz = Party(name="Q", vat_number="123456789", country_code="ZZ",
+               address=Address("e", "0000", "Nowhere", None, "ZZ"))
+    assert zz.peppol_endpoint() == (None, None)
+    explicit = Party(name="W", vat_number="01234567897",
+                     endpoint_scheme="9906", endpoint_id="IT01234567897",
                      address=Address("d", "20100", "Milano", "MI"))
-    assert explicit.peppol_endpoint() == ("9906", "IT01234567890")
+    assert explicit.peppol_endpoint() == ("9906", "IT01234567897")
 
 
 def test_resolved_recipient_b2c_falls_back_to_zeroes():

@@ -51,6 +51,7 @@ from .models import (
     SocialSecurityFund,
     WithholdingTax,
 )
+from .rates import ProductCategory
 
 __all__ = ["invoice_to_dict", "invoice_from_dict", "invoice_to_json", "invoice_from_json"]
 
@@ -164,6 +165,7 @@ def _line(data: dict, index: int) -> LineItem:
     line.period_start = _opt_date(data.get("period_start"), f"{context}.period_start")
     line.period_end = _opt_date(data.get("period_end"), f"{context}.period_end")
     line.exemption_reason = data.get("exemption_reason")
+    line.category = _enum(ProductCategory, data.get("category"), f"{context}.category")
     return line
 
 
@@ -316,6 +318,7 @@ def _line_to_dict(line: LineItem) -> dict:
         "period_start": line.period_start.isoformat() if line.period_start else None,
         "period_end": line.period_end.isoformat() if line.period_end else None,
         "exemption_reason": line.exemption_reason,
+        "category": line.category.value if line.category else None,
     })
 
 
