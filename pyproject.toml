@@ -1,0 +1,98 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "einvoice"
+version = "0.4.0"
+description = "Standalone, reusable e-invoicing engine for Italy, the EU, the UK and the US: FatturaPA/SdI XML builder (full 1.2.2 code lists), UBL Peppol BIS 3.0 / EN 16931 renderer (Invoice + CreditNote, XRechnung CIUS, US sales-tax scheme), country profiles with tax-id validation (EU-27 + GB + US), CAdES (.p7m) signing, conservation-package export, provider connectors (FattureInCloud, Aruba, Zucchetti, Peppol AP, configurable REST hubs) + plain XML export."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "einvoice contributors" }]
+keywords = [
+    "fatturapa", "fatturazione-elettronica", "sdi", "e-invoice", "einvoicing",
+    "italy", "peppol", "ubl", "en16931", "europe", "xrechnung", "uk", "usa",
+    "cades", "p7m", "conservazione",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Accounting",
+    "Typing :: Typed",
+]
+
+# The CORE (models, XML builders, naming, serde, country profiles) has ZERO
+# runtime dependencies — pure stdlib. ``httpx`` is only needed by the network
+# provider adapters and ``cryptography`` only by the CAdES signer; both are
+# imported lazily, so they stay optional and the core stays installable
+# anywhere.
+dependencies = []
+
+[project.optional-dependencies]
+providers = ["httpx>=0.24"]
+signing = ["cryptography>=42"]
+all = ["httpx>=0.24", "cryptography>=42"]
+dev = ["httpx>=0.24", "cryptography>=42", "pytest>=7", "ruff>=0.5", "mypy>=1.8"]
+
+[project.scripts]
+einvoice = "einvoice.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/andrex/einvoice"
+Repository = "https://github.com/andrex/einvoice"
+Issues = "https://github.com/andrex/einvoice/issues"
+Changelog = "https://github.com/andrex/einvoice/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# PEP 561: ship the marker so downstream type-checkers actually read our hints.
+[tool.setuptools.package-data]
+einvoice = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF", "PLC0415"]
+ignore = [
+    # Lazy imports are load-bearing here: they are how `httpx` and
+    # `cryptography` stay optional and how the core keeps zero dependencies.
+    "PLC0415",
+    # Docs, docstrings and comments are in Italian and quote the standards
+    # verbatim — typographic quotes, en-dashes and «−» in formulas are correct
+    # text, not homoglyph mistakes.
+    "RUF001", "RUF002", "RUF003",
+    # `__all__` is grouped by architectural layer (domain, formats, transport,
+    # …) to mirror the package. Alphabetical order would destroy that reading.
+    "RUF022",
+    # StrEnum would change the enums' runtime type. These values are serialized
+    # into fiscal XML and compared by client code; the churn is not worth it.
+    "UP042",
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test files legitimately use throwaway lambdas, single-letter loop vars, and
+# imports placed next to the case they support.
+"tests/*" = ["E501", "E402", "E731", "E741", "RUF015"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["einvoice"]
+mypy_path = "src"
+ignore_missing_imports = true      # httpx / cryptography are optional extras
+warn_unused_ignores = true
+warn_redundant_casts = true

@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  core-without-extras:
+    # The selling point of the package is that XML generation needs nothing but
+    # the standard library. That claim is only true if it is tested: install the
+    # bare package and prove the core still renders with httpx and cryptography
+    # absent, so a stray top-level import cannot slip in unnoticed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - run: pip install pytest
+      - name: no optional dependency is importable
+        run: |
+          python - <<'PY'
+          import importlib.util, sys
+          for mod in ("httpx", "cryptography"):
+              if importlib.util.find_spec(mod) is not None:
+                  sys.exit(f"{mod} must NOT be installed for this job")
+          PY
+      - name: the core renders anyway
+        run: |
+          python - <<'PY'
+          from datetime import date
+          from decimal import Decimal
+          from einvoice import Address, Invoice, LineItem, Party, build_fattura_xml
+          xml = build_fattura_xml(Invoice(
+              number="2026/0001", date=date(2026, 6, 5),
+              seller=Party(name="Mario", vat_number="01234567890",
+                           address=Address("Via Roma 1", "20100", "Milano", "MI")),
+              buyer=Party(name="ACME", vat_number="09876543210",
+                          address=Address("Via Verdi 9", "00100", "Roma", "RM")),
+              lines=[LineItem.from_gross("Cena", 1, Decimal("122.00"), 22)],
+          ))
+          assert b"FatturaElettronica" in xml
+          print("core OK without extras:", len(xml), "bytes")
+          PY
+      - run: python -m einvoice transports
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff mypy
+      - run: ruff check .
+      - run: pip install -e . && mypy || true   # advisory until fully annotated
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
