@@ -81,42 +81,45 @@ Out of scope: anything that assumes a specific host application (a database, a
 web framework, an ORM). The package is deliberately a library. If a change only
 makes sense inside one product, it belongs in that product's integration layer.
 
-## Publishing this as a standalone repository
+## How this SDK is consumed
 
-The directory is already self-contained — `pyproject.toml`, `LICENSE`,
-`CHANGELOG.md`, `.gitignore` and `.github/workflows/ci.yml` all live here, and
-nothing under `src/` imports anything outside the package. Extracting it is:
+It is a normal Python dependency, installed from this repository:
 
-```bash
-cp -R einvoice/ ../einvoice-standalone && cd ../einvoice-standalone
-rm -rf .venv .pytest_cache .ruff_cache dist build *.egg-info
-git init && git add . && git commit -m "einvoice 0.4.0"
-git remote add origin git@github.com:<you>/einvoice.git
-git push -u origin main
+```toml
+# in the host's pyproject.toml
+dependencies = [
+    "einvoice @ git+https://github.com/AndrexOfficial/eInvoicing-py-SDK.git@<commit-or-tag>",
+]
 ```
 
-Then update the four `[project.urls]` entries in `pyproject.toml` to the real
-repository, and the CI workflow runs as-is.
+Current consumers: **TableOS** and **GymOS** (`backend/pyproject.toml` in each).
+Both pin a **commit, not a branch**. That is deliberate: this package generates
+fiscal documents, and `@main` would silently change the bytes a host transmits
+to SdI between two builds of the same commit. Moving a pin is an explicit edit,
+reviewed like any other.
 
-To keep history rather than starting fresh, `git subtree split -P einvoice -b einvoice-only`
-from the host repo gives a branch containing only this directory's commits.
+Hosts building in Docker need **`git`** in the image, or pip cannot resolve a
+`git+https` requirement.
 
-### The sync obligation
+### Releasing
 
-Until it is published and consumed from PyPI, this package is **vendored into
-two host repositories** (TableOS and GymOS) and the two copies must stay
-byte-identical. A change to one is not done until it is mirrored:
+1. Land the change here, with tests.
+2. Bump `version` in `pyproject.toml` and add a `CHANGELOG.md` entry.
+3. Tag it: `git tag v0.4.1 && git push --tags`.
+4. Update the pin in each consumer's `backend/pyproject.toml`, and run that
+   product's test suite before merging — a green suite here does not prove a
+   host still works, only that the engine does.
 
-```bash
-diff -r --exclude=.venv --exclude=.pytest_cache --exclude=.ruff_cache \
-        --exclude=build --exclude='*.egg-info' --exclude=__pycache__ \
-        --exclude=uv.lock --exclude=dist TableOS/einvoice GymOS/einvoice
-```
+Nothing is vendored into the consumers any more. Earlier, the package lived as a
+byte-identical copy inside both host repos, which went exactly as you would
+expect: they drifted, and each ended up with a *different* HTTP client for the
+same vendors — the two Aruba implementations disagreed about the auth host and
+the upload path, so at most one of them could have been correct, and nothing
+pointed that out. If you find yourself copying this directory into an
+application, that is the failure you are signing up for.
 
-That command must print nothing. Divergence here is not hypothetical: before
-0.4.0 the two host repos carried *separate* HTTP clients for the same vendors,
-and they disagreed about Aruba's auth host and upload path — so at most one of
-them could have been correct, and nothing pointed that out.
+### Publishing to PyPI
 
-Once the package is on PyPI both hosts should depend on a version instead, and
-this section can go.
+Not published yet. When it is, consumers should depend on a version specifier
+(`einvoice>=0.4,<0.5`) instead of a git URL, and the pinning discussion above
+becomes ordinary dependency resolution.

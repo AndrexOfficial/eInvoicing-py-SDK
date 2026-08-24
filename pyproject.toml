@@ -45,10 +45,10 @@ dev = ["httpx>=0.24", "cryptography>=42", "pytest>=7", "ruff>=0.5", "mypy>=1.8"]
 einvoice = "einvoice.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/andrex/einvoice"
-Repository = "https://github.com/andrex/einvoice"
-Issues = "https://github.com/andrex/einvoice/issues"
-Changelog = "https://github.com/andrex/einvoice/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/AndrexOfficial/eInvoicing-py-SDK"
+Repository = "https://github.com/AndrexOfficial/eInvoicing-py-SDK"
+Issues = "https://github.com/AndrexOfficial/eInvoicing-py-SDK/issues"
+Changelog = "https://github.com/AndrexOfficial/eInvoicing-py-SDK/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
