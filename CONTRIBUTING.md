@@ -88,15 +88,18 @@ It is a normal Python dependency, installed from this repository:
 ```toml
 # in the host's pyproject.toml
 dependencies = [
-    "einvoice @ git+https://github.com/AndrexOfficial/eInvoicing-py-SDK.git@<commit-or-tag>",
+    "einvoice @ git+https://github.com/AndrexOfficial/eInvoicing-py-SDK.git@0.4.0",
 ]
 ```
 
 Current consumers: **TableOS** and **GymOS** (`backend/pyproject.toml` in each).
-Both pin a **commit, not a branch**. That is deliberate: this package generates
-fiscal documents, and `@main` would silently change the bytes a host transmits
-to SdI between two builds of the same commit. Moving a pin is an explicit edit,
-reviewed like any other.
+Both pin a **release tag, not a branch**. That is deliberate: this package
+generates fiscal documents, and `@main` would silently change the bytes a host
+transmits to SdI between two builds of the same commit. Moving a pin is an
+explicit edit, reviewed like any other — which also means a published tag must
+never be force-moved, or you break that guarantee for everyone already on it.
+
+Tags here are bare versions, **without a `v` prefix**: `0.4.0`, not `v0.4.0`.
 
 Hosts building in Docker need **`git`** in the image, or pip cannot resolve a
 `git+https` requirement.
@@ -105,7 +108,7 @@ Hosts building in Docker need **`git`** in the image, or pip cannot resolve a
 
 1. Land the change here, with tests.
 2. Bump `version` in `pyproject.toml` and add a `CHANGELOG.md` entry.
-3. Tag it: `git tag v0.4.1 && git push --tags`.
+3. Tag it: `git tag 0.4.1 && git push --tags` (no `v` prefix).
 4. Update the pin in each consumer's `backend/pyproject.toml`, and run that
    product's test suite before merging — a green suite here does not prove a
    host still works, only that the engine does.
