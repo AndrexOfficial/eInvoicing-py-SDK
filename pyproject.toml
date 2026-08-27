@@ -38,9 +38,9 @@ dependencies = []
 
 [project.optional-dependencies]
 providers = ["httpx>=0.24"]
-signing = ["cryptography>=42"]
-all = ["httpx>=0.24", "cryptography>=42"]
-dev = ["httpx>=0.24", "cryptography>=42", "pytest>=7", "ruff>=0.5", "mypy>=1.8"]
+signing = ["cryptography>=50.0.0"]
+all = ["httpx>=0.24", "cryptography>=50.0.0"]
+dev = ["httpx>=0.24", "cryptography>=50.0.0", "pytest>=7", "ruff>=0.5", "mypy>=1.8"]
 
 [project.scripts]
 einvoice = "einvoice.cli:main"
