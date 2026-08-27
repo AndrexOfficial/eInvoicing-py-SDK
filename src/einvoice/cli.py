@@ -399,11 +399,15 @@ def _print_setup_guide(key: str, lang: str | None) -> int:
     print(f"{labels['markets']}: {', '.join(guide['countries'])}")
     print(f"{labels['format']}: {guide['renderer_syntax']}  ({guide['renderer']})")
     print(f"{labels['capabilities']}: {', '.join(c['label'] for c in guide['capabilities'])}")
-    print(f"{guide['verification_label']}")
+    if guide["verification_label"]:
+        print(f"{guide['verification_label']}")
     if guide["docs_url"]:
         print(f"{labels['documentation']}: {guide['docs_url']}")
 
-    print(f"\n{labels['credentials']}")
+    # A manual channel collects nothing; an empty "Credentials" heading reads
+    # like the list failed to load.
+    if guide["credentials"]:
+        print(f"\n{labels['credentials']}")
     for field in guide["credentials"]:
         secret = " ***" if field["secret"] else ""
         optional = f" ({field['optional_label']})" if field.get("optional_label") else ""

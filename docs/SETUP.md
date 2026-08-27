@@ -26,7 +26,7 @@ einvoice locales
 
 ## Composte, non scritte
 
-Scrivere sessantacinque guide in prosa le avrebbe risolte **in una lingua sola**.
+Scrivere settantadue guide in prosa le avrebbe risolte **in una lingua sola**.
 Invece ogni preset nomina una sequenza ordinata di **chiavi di passo**
 (`einvoice.i18n`), e la sequenza è in gran parte **derivata**: dalle credenziali
 che il preset dichiara, dal fatto che il suo host sia conoscibile in anticipo,

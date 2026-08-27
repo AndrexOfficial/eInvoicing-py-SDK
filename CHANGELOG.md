@@ -43,6 +43,19 @@ sessantacinque piattaforme» e «una persona riesce a configurarne una».
   ha un import solo.
 - **CLI**: `providers <key> --setup --lang xx`, `renderers` (ora descrive
   invece di elencare, con `--country` e `--lang`), `locales`.
+- **Sette piattaforme italiane in più** (65 → 72), quelle che un esercente
+  incontra davvero cercando: **Fattura24**, **Libero SiFattura**, **Fattura per
+  tutti**, **FatturaElettronicaAPP** sull'hub REST configurabile, con
+  `base_url` a carico del chiamante come vuole la regola sugli endpoint non
+  verificati; e **Agenzia delle Entrate (Fatture e Corrispettivi)**, **SdI via
+  PEC**, **AssoInvoice** come *canali manuali*.
+- **`ProviderPreset.manual_delivery` / `.delivery_target`** — il modo per dire
+  «qui non c'è nessuna API». Tre dei canali più usati in Italia non ne hanno
+  uno: vestirli da preset REST avrebbe prodotto voci che sembrano integrate e
+  falliscono al primo invio, ometterli avrebbe fatto finta che il canale
+  ufficiale gratuito non esista. Girano sul trasporto `file`, non chiedono
+  credenziali, non mostrano il badge degli endpoint, e dichiarano l'unica cosa
+  che costano in silenzio: **nessuno stato torna indietro**.
 - **`label.optional`** e i campi `placeholder` / `optional_label` /
   `required` su `credential_fields()`: `base_url` è sempre presente ed è
   **facoltativo** dove l'host è noto. Ogni trasporto legge `config.base_url or

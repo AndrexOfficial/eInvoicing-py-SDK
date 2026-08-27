@@ -107,6 +107,26 @@ class ProviderPreset:
     #: one fact that decides whether the preset is usable at all, and a warning
     #: only an Italian reader can find is a warning that gets missed.
     incompatible_national_format: str | None = None
+    #: How a human delivers the document when there is **no API to call**:
+    #: ``"portal"`` (upload it yourself), ``"pec"`` (certified email),
+    #: ``"app"`` (open it in a desktop program).
+    #:
+    #: Some of the most widely used Italian channels are in this category — the
+    #: Agenzia delle Entrate portal, the SdI PEC address, AssoInvoice — and
+    #: every one of them is a channel a real business actually uses. Dressing
+    #: them up as REST presets would have produced three entries that look
+    #: integrated and fail on first use; leaving them out would have pretended
+    #: the free official channel does not exist. So they run on
+    #: :class:`~einvoice.transport.file_export.FileExportTransport`: the package
+    #: still produces the correct FatturaPA under the right SdI filename, and
+    #: the guide says who carries it the last mile.
+    #:
+    #: Presets in this mode collect **no credentials at all** and cannot report
+    #: status — see :func:`einvoice.onboarding.setup_steps`.
+    manual_delivery: str | None = None
+    #: Where the document has to be delivered by hand: a PEC address, a portal
+    #: URL. Rendered into the manual-delivery step.
+    delivery_target: str | None = None
 
     @property
     def country(self) -> str:
@@ -116,8 +136,18 @@ class ProviderPreset:
 
     @property
     def needs_base_url(self) -> bool:
-        """True when the account's host is not knowable in advance."""
-        return self.base_url is None
+        """True when the account's host is not knowable in advance.
+
+        Always False for a manual channel: there is no host, and asking an
+        operator for the API URL of a PEC address is asking a question with no
+        answer.
+        """
+        return self.base_url is None and self.manual_delivery is None
+
+    @property
+    def is_manual(self) -> bool:
+        """No API to call — the package produces the file, a human delivers it."""
+        return self.manual_delivery is not None
 
     def serves(self, country_code: str) -> bool:
         """Whether this platform covers a country, directly or as an aggregator."""
@@ -170,6 +200,27 @@ def _hub(key, name, countries, *, kind="access_point", creds=("api_key",), docs=
         supports=tuple(supports), base_url=base_url, docs_url=docs,
         extra=extra or {}, endpoints_verified=False, notes=notes,
         setup_flags=tuple(setup_flags), incompatible_national_format=national_format,
+    )
+
+
+def _manual(key, name, countries, *, kind, mode, target=None, docs="",
+            renderer="fatturapa", notes="") -> ProviderPreset:
+    """A channel with **no API**, run on the file-export transport.
+
+    The three biggest ones in Italy are in this shape — the Agenzia delle
+    Entrate portal, the SdI PEC address, AssoInvoice — and pretending any of
+    them speaks REST would have shipped presets that fail on first use. Here
+    the package does the part it can do correctly (a valid FatturaPA under the
+    filename SdI expects) and the guide names who carries it the rest of the
+    way.
+    """
+    return ProviderPreset(
+        key=key, name=name,
+        countries=(countries,) if isinstance(countries, str) else tuple(countries),
+        transport="file", kind=kind, renderer=renderer,
+        credentials=(), supports=("send",), docs_url=docs,
+        endpoints_verified=False, notes=notes,
+        manual_delivery=mode, delivery_target=target,
     )
 
 
@@ -265,6 +316,66 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         "register_it", "Register.it Fatturazione", "IT", kind="sdi_intermediary",
         renderer="fatturapa", docs="https://www.register.it/",
         notes="Offerta entry-level, spesso abbinata a PEC e domini."),
+    "fattura24": _hub(
+        "fattura24", "Fattura24", "IT", kind="accounting_platform",
+        renderer="fatturapa", docs="https://www.fattura24.com/",
+        supports=("send", "status", "receive"),
+        notes="Gestionale cloud molto diffuso fra piccole partite IVA, con API "
+              "pubblica documentata. L'host pubblicizzato è app.fattura24.com, "
+              "ma il path e i nomi dei campi cambiano fra versioni dell'API: "
+              "prendi base_url e schema di autenticazione dalla tua "
+              "documentazione e sovrascrivi `extra` se serve."),
+    "libero_sifattura": _hub(
+        "libero_sifattura", "Libero SiFattura", "IT", kind="sdi_intermediary",
+        renderer="fatturapa", creds=("username", "password"),
+        docs="https://sifattura.libero.it/",
+        notes="Servizio di Italiaonline, venduto insieme alla PEC Libero. "
+              "L'accesso applicativo non è pubblico: chiedi al fornitore "
+              "base_url, credenziali tecniche e path di upload prima di "
+              "configurarlo qui."),
+    "fattura_per_tutti": _hub(
+        "fattura_per_tutti", "Fattura per tutti", "IT", kind="sdi_intermediary",
+        renderer="fatturapa", docs="https://www.fatturapertutti.it/",
+        notes="Servizio pensato per forfettari e piccole imprese. Contratto API "
+              "da confermare col fornitore: servono base_url, schema di "
+              "autenticazione e path di upload.",
+        setup_flags=("contract",)),
+    "fatturaelettronica_app": _hub(
+        "fatturaelettronica_app", "FatturaElettronicaAPP", "IT",
+        kind="accounting_platform", renderer="fatturapa",
+        docs="https://www.fatturaelettronicaapp.it/",
+        supports=("send", "status", "receive"),
+        notes="App di fatturazione per partite IVA individuali. Verifica sul "
+              "tuo account se l'accesso via API è incluso nel piano: su diversi "
+              "piani è un'aggiunta."),
+
+    # ── Canali senza API: il file lo consegni tu ───────────────────────
+    "agenzia_entrate": _manual(
+        "agenzia_entrate", "Agenzia delle Entrate — Fatture e Corrispettivi", "IT",
+        kind="national_portal", mode="portal",
+        docs="https://ivaservizi.agenziaentrate.gov.it/",
+        notes="Il canale ufficiale e gratuito. Il portale «Fatture e "
+              "Corrispettivi» si usa a mano (accesso SPID/CIE/CNS) e non "
+              "espone API a terzi; l'accesso applicativo esiste ma è SdICoop "
+              "(web service SOAP su mTLS) o SdIFtp e richiede accreditamento "
+              "presso l'Agenzia — protocolli che questo pacchetto non parla. "
+              "Qui produciamo il file corretto, l'upload lo fai tu."),
+    "sdipec": _manual(
+        "sdipec", "SdI via PEC", "IT", kind="national_portal", mode="pec",
+        target="sdi01@pec.fatturapa.it",
+        docs="https://www.fatturapa.gov.it/it/sistemainterscambio/modalita-trasmissione/",
+        notes="Il canale gratuito senza intermediari: si spedisce la FatturaPA "
+              "come allegato dalla propria PEC. La PRIMA trasmissione va a "
+              "sdi01@pec.fatturapa.it; SdI risponde da un indirizzo diverso, "
+              "ed è quello da usare da lì in avanti. Limite di 30 MB per "
+              "messaggio."),
+    "assoinvoice": _manual(
+        "assoinvoice", "AssoInvoice (AssoSoftware)", "IT",
+        kind="accounting_platform", mode="app",
+        docs="https://www.assosoftware.it/assoinvoice",
+        notes="Applicazione desktop gratuita di AssoSoftware per leggere e "
+              "trasmettere la FatturaPA. Non è un servizio con API: si apre il "
+              "file prodotto qui dentro AssoInvoice e si invia da lì."),
 
     # ══ Peppol access points / reti di interscambio ═════════════════════
     "storecove": _hub(

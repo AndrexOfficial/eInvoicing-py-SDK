@@ -104,6 +104,22 @@ def setup_steps(preset: ProviderPreset) -> list[SetupStep]:
     it somewhere harmless, then save.
     """
     platform = {"platform": preset.name}
+
+    if preset.is_manual:
+        # A channel with no API needs none of the sequence below: there is
+        # nothing to request, no key to copy, no host to point at and no
+        # sandbox to try first. Walking an operator through eight steps that
+        # all end in "leave this empty" is how a guide teaches people to stop
+        # reading guides.
+        manual = [SetupStep("step.render_format",
+                            {"format": _renderer_syntax(preset.renderer)})]
+        if preset.manual_delivery == "pec":
+            manual.append(SetupStep("step.manual_delivery_pec",
+                                    {"address": preset.delivery_target or ""}))
+        else:
+            manual.append(SetupStep("step.manual_delivery", platform))
+        return manual
+
     steps = [SetupStep("step.create_account", platform)]
 
     if "contract" in preset.setup_flags:
@@ -162,7 +178,13 @@ def setup_caveats(preset: ProviderPreset) -> list[SetupStep]:
     if preset.incompatible_national_format:
         caveats.append(SetupStep("step.national_format_warning",
                                  {"format": preset.incompatible_national_format}))
+    if preset.is_manual:
+        # The one thing a manual channel silently costs you: nothing polls, so
+        # "sent" is a state only a person can move the record into.
+        caveats.append(SetupStep("step.no_status_tracking"))
+        return caveats
     if not preset.endpoints_verified:
+        # Only meaningful where there are endpoint paths to get wrong.
         caveats.append(SetupStep("step.confirm_paths", {"platform": preset.name}))
     return caveats
 
@@ -184,6 +206,10 @@ def credential_fields(preset: ProviderPreset, locale: str | None = DEFAULT_LOCAL
     empty field will fall back to without being invited to retype it.
     """
     resolved = normalize_locale(locale)
+    if preset.is_manual:
+        # No API, no account, nothing to store. An empty form is the honest
+        # answer; a Base URL box next to "upload it yourself" is not.
+        return []
     keys = list(preset.credentials)
     if "base_url" not in keys:
         keys.append("base_url")
@@ -235,9 +261,14 @@ def setup_guide(key: str, locale: str | None = DEFAULT_LOCALE) -> dict[str, Any]
         "sandbox_url": preset.sandbox_url,
         "docs_url": preset.docs_url,
         "endpoints_verified": preset.endpoints_verified,
-        "verification_label": translate(
+        # A manual channel has no endpoints, so neither "verified" nor "to
+        # confirm" says anything true about it. ``None`` lets a UI drop the
+        # badge instead of showing a warning about paths that do not exist.
+        "verification_label": None if preset.is_manual else translate(
             "label.verified_yes" if preset.endpoints_verified else "label.verified_no", resolved
         ),
+        "manual_delivery": preset.manual_delivery,
+        "delivery_target": preset.delivery_target,
         "steps": [{"key": s.key, "text": s.text(resolved)} for s in setup_steps(preset)],
         "caveats": [{"key": s.key, "text": s.text(resolved)} for s in setup_caveats(preset)],
         # The preset's own free-text note. Authored in Italian and NOT part of

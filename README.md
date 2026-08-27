@@ -6,7 +6,7 @@ Un dominio fiscale pulito (modello unico + stati + notifiche + audit), separato
 dai formati nazionali e dai canali di trasporto. **EN 16931 in entrambe le
 sintassi** — UBL (Peppol BIS 3.0) e UN/CEFACT CII (Factur-X / ZUGFeRD / Chorus
 Pro) — più **FatturaPA/SdI**, in **scrittura e in lettura**, con **profili paese
-per UE-27 + Regno Unito + Svizzera + Stati Uniti** e preset per **65
+per UE-27 + Regno Unito + Svizzera + Stati Uniti** e preset per **72
 piattaforme**.
 
 ## Tre livelli (mix & match)
@@ -20,7 +20,7 @@ Invoice + Lifecycle    →     fatturapa                →      file · aruba
 + 30 country profiles        ubl   (Peppol BIS,               fattureincloud[_xml]
 + tax-id checksums            XRechnung/NLCIUS/CIUS-RO)       zucchetti · peppol
 + e-invoicing regimes        cii   (Factur-X, ZUGFeRD,        hub (configurabile)
-+ validate() / check()        Chorus Pro)                     25 preset piattaforma
++ validate() / check()        Chorus Pro)                     72 preset piattaforma
 ```
 
 | Livello | Dipendenze | Cosa fa |
@@ -481,7 +481,7 @@ leggono, è supportato a metà. Dettagli in [docs/SETUP.md](docs/SETUP.md).
 - [docs/CLI.md](docs/CLI.md) — riga di comando e formato JSON (riferimento campi)
 - [docs/COUNTRIES.md](docs/COUNTRIES.md) — matrice paese per paese: formati, obblighi, tax-id
 - [docs/TAXES.md](docs/TAXES.md) — aliquote IVA **per categoria di prodotto** e regole fiscali (conservazione, soglie, termini)
-- [docs/PROVIDERS.md](docs/PROVIDERS.md) — le 65 piattaforme e come collegarne una nuova
+- [docs/PROVIDERS.md](docs/PROVIDERS.md) — le 72 piattaforme e come collegarne una nuova
 - [docs/SETUP.md](docs/SETUP.md) — istruzioni di configurazione per ogni piattaforma e formato, in 31 lingue
 - [docs/PARSING.md](docs/PARSING.md) — leggere una fattura ricevuta: cosa sopravvive e cosa no
 - [docs/CORRECTIONS.md](docs/CORRECTIONS.md) — note di credito, note di debito e resi

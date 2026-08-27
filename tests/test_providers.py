@@ -43,8 +43,19 @@ def test_every_preset_declares_its_key_consistently(key):
 @pytest.mark.parametrize("key", sorted(PROVIDER_PRESETS))
 def test_unverified_presets_require_a_base_url_or_name_one(key):
     """If we have not called it, the caller must supply the host — the whole
-    point of the honesty flag is that we do not invent one."""
+    point of the honesty flag is that we do not invent one.
+
+    A manual channel is the one exemption, and only because it is the same
+    honesty taken further: there is no host at all. The Agenzia delle Entrate
+    portal, the SdI PEC address and AssoInvoice are delivered by a person, so
+    demanding a base_url would be inventing a question rather than an answer.
+    """
     preset = PROVIDER_PRESETS[key]
+    if preset.is_manual:
+        assert preset.transport == "file" and not preset.credentials, (
+            f"{key}: a manual channel must not pretend to have an API to call"
+        )
+        return
     if not preset.endpoints_verified:
         assert preset.needs_base_url or preset.base_url, (
             f"{key}: unverified preset must either ask for base_url or carry a "

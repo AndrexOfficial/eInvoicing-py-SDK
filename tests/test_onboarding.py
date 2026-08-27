@@ -114,6 +114,8 @@ def test_base_url_is_required_exactly_when_the_preset_cannot_default_it(key):
     """The two facts must not drift: a field marked optional whose transport
     then refuses to build is a form that lies about what it needs."""
     preset = PROVIDER_PRESETS[key]
+    if preset.is_manual:
+        return          # no form at all — see test_a_manual_channel_collects_nothing
     base_url = next(f for f in credential_fields(preset, "en") if f["key"] == "base_url")
 
     assert base_url["required"] is preset.needs_base_url
@@ -228,3 +230,86 @@ def test_the_guide_never_points_at_a_field_the_form_does_not_render():
         fields = {f["key"] for f in credential_fields(preset, "en")}
         if {"step.known_base_url", "step.ask_base_url"} & steps:
             assert "base_url" in fields, key
+
+
+# ── canali senza API ──────────────────────────────────────────────────
+#
+# The Agenzia delle Entrate portal, the SdI PEC address and AssoInvoice are
+# among the most used channels in Italy and none of them speaks REST. Modelling
+# them as hub presets would have shipped three entries that look integrated and
+# fail on first use.
+
+MANUAL = ["agenzia_entrate", "sdipec", "assoinvoice"]
+
+
+@pytest.mark.parametrize("key", MANUAL)
+def test_a_manual_channel_exports_a_file_instead_of_pretending_to_have_an_api(key):
+    preset = preset_for(key)
+
+    assert preset.is_manual
+    assert preset.transport == "file"
+    assert preset.credentials == ()
+    assert preset.needs_base_url is False, "there is no host to ask for"
+
+
+@pytest.mark.parametrize("key", MANUAL)
+def test_a_manual_channel_collects_nothing(key):
+    """A Base URL box next to "upload it yourself" is not an honest form."""
+    assert credential_fields(preset_for(key), "it") == []
+
+
+@pytest.mark.parametrize("key", MANUAL)
+def test_a_manual_channel_says_who_carries_the_file(key):
+    steps = [s.key for s in setup_steps(preset_for(key))]
+
+    assert "step.render_format" in steps
+    assert {"step.manual_delivery", "step.manual_delivery_pec"} & set(steps)
+    # None of the API sequence applies.
+    assert not {"step.request_api_access", "step.copy_api_key", "step.ask_base_url",
+                "step.known_base_url", "step.store_credentials"} & set(steps)
+
+
+@pytest.mark.parametrize("key", MANUAL)
+def test_a_manual_channel_admits_that_nothing_polls(key):
+    """The one thing it silently costs: "sent" becomes a state only a person
+    can move the record into."""
+    assert "step.no_status_tracking" in [c.key for c in setup_caveats(preset_for(key))]
+
+
+@pytest.mark.parametrize("key", MANUAL)
+def test_a_manual_channel_shows_no_endpoint_badge(key):
+    """Neither "verified" nor "to confirm" says anything true about a channel
+    with no endpoints."""
+    assert setup_guide(key, "en")["verification_label"] is None
+
+
+def test_the_pec_step_carries_the_address_it_is_about():
+    guide = setup_guide("sdipec", "it")
+    pec = next(s for s in guide["steps"] if s["key"] == "step.manual_delivery_pec")
+
+    assert "sdi01@pec.fatturapa.it" in pec["text"]
+    assert guide["delivery_target"] == "sdi01@pec.fatturapa.it"
+
+
+@pytest.mark.parametrize("key", ["fattura24", "libero_sifattura", "fattura_per_tutti",
+                                 "fatturaelettronica_app"])
+def test_the_new_rest_presets_ask_the_caller_for_the_host(key):
+    """None of these four has been called from here, so none of them ships a
+    URL: the project rule is that an unverified endpoint is the caller's to
+    supply, not ours to invent."""
+    preset = preset_for(key)
+
+    assert preset.endpoints_verified is False
+    assert preset.needs_base_url is True
+    assert preset.base_url is None
+
+
+def test_every_platform_named_by_the_italian_market_roundup_is_present():
+    """The list a shop owner actually meets when they go looking."""
+    expected = {
+        "fattura24", "aruba", "fattureincloud", "libero_sifattura",
+        "fattura_per_tutti", "fiscozen", "fatturaelettronica_app", "danea",
+        "agenzia_entrate", "assoinvoice", "sdipec",
+    }
+
+    assert expected <= set(PROVIDER_PRESETS)

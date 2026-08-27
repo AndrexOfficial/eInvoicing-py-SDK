@@ -33,7 +33,7 @@ il motivo per cui quasi tutti richiedono `base_url` dal chiamante.
 
 ## Le categorie
 
-Con sessantacinque voci una lista piatta smette di essere navigabile, e le
+Con settantadue voci una lista piatta smette di essere navigabile, e le
 categorie differiscono in modi che cambiano l'integrazione:
 
 | Categoria | Cosa significa per te |
@@ -193,6 +193,39 @@ Pro in produzione).
 
 E se implementi un flusso contro un contratto pubblico e lo copri con i test,
 allora — e solo allora — metti `endpoints_verified=True`.
+
+## Canali senza API
+
+Tre fra i canali più usati in Italia non espongono nessuna API a chi paga le
+tasse: il portale **Fatture e Corrispettivi** dell'Agenzia delle Entrate (si usa
+a mano con SPID/CIE/CNS; l'accesso applicativo è SdICoop, SOAP su mTLS, e vuole
+l'accreditamento), l'invio **via PEC** a `sdi01@pec.fatturapa.it`, e
+**AssoInvoice**, che è un programma desktop.
+
+Vestirli da preset REST avrebbe prodotto tre voci che *sembrano* integrate e
+falliscono al primo invio. Lasciarli fuori avrebbe fatto finta che il canale
+ufficiale e gratuito non esista. Quindi girano sul trasporto `file`:
+
+```python
+preset_for("sdipec").is_manual          # True
+preset_for("sdipec").transport          # 'file'
+preset_for("sdipec").credentials        # () — non c'è niente da raccogliere
+preset_for("sdipec").delivery_target    # 'sdi01@pec.fatturapa.it'
+```
+
+Il pacchetto fa la parte che sa fare bene — una FatturaPA valida col nome di
+trasmissione che SdI si aspetta — e la guida dice chi la porta all'ultimo
+miglio. Un preset così **non chiede credenziali**, non ha `base_url` (chiederlo
+sarebbe inventare una domanda, non una risposta), non mostra il badge
+`endpoints_verified` (non ha endpoint) e dichiara l'unica cosa che il canale
+costa in silenzio: **nessuno stato torna indietro**, quindi «inviata» è uno
+stato che può muovere solo una persona.
+
+| Chiave | `manual_delivery` | Consegna |
+|---|---|---|
+| `agenzia_entrate` | `portal` | Upload sul portale Fatture e Corrispettivi |
+| `sdipec` | `pec` | Allegato da PEC a `sdi01@pec.fatturapa.it` (poi all'indirizzo da cui SdI risponde) |
+| `assoinvoice` | `app` | Si apre il file in AssoInvoice e si invia da lì |
 
 ## Istruzioni di configurazione
 
