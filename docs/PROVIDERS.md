@@ -193,3 +193,28 @@ Pro in produzione).
 
 E se implementi un flusso contro un contratto pubblico e lo copri con i test,
 allora — e solo allora — metti `endpoints_verified=True`.
+
+## Istruzioni di configurazione
+
+Ogni preset produce una guida di setup completa — passi, campi credenziali
+etichettati, avvertenze — in **31 lingue**, generata dal preset stesso:
+
+```bash
+einvoice providers fattureincloud --setup --lang de
+```
+
+```python
+from einvoice.onboarding import setup_guide
+setup_guide("fattureincloud", "de")["credentials"]   # solo api_key + company_id
+```
+
+Non c'è niente da tradurre quando aggiungi una piattaforma: la sequenza dei
+passi è derivata dai campi che hai già compilato. Restano due campi opzionali
+per i fatti che una tupla di credenziali non rivela:
+
+| Campo | A cosa serve |
+|---|---|
+| `setup_flags` | `contract` (credenziali a contratto, non da form), `oauth2` (registri un'applicazione), `certificate` (serve un certificato qualificato per la connessione). |
+| `incompatible_national_format` | Il canale accetta **solo** una sintassi nazionale che non generiamo — `"FA(2)"` per KSeF, `"Facturae 3.2.x"` per FACe. Diventa un'avvertenza in cima alla guida, e sopprime il passo «renderizza X», che altrimenti contraddirebbe l'avvertenza stessa. |
+
+Dettagli e regole di composizione: [SETUP.md](SETUP.md).

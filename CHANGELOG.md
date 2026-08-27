@@ -4,6 +4,64 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-08-27
+
+Il rilascio che riempie il buco fra «il pacchetto sa parlare con
+sessantacinque piattaforme» e «una persona riesce a configurarne una».
+
+### Added
+
+- **`einvoice.i18n`** — catalogo di etichette in **31 lingue**: le lingue
+  ufficiali dei trenta paesi profilati (UE-27 + UK + CH + US) più le locale
+  d'interfaccia che i prodotti ospitanti spediscono. Un paese di cui
+  dichiariamo le regole, in una lingua che i suoi contribuenti non leggono, è
+  supportato a metà. `translate()`, `normalize_locale()` (`pt-BR` → `pt`, e la
+  spazzatura degrada all'inglese invece di sollevare: sta dietro un query
+  parameter), `locale_for_country()`.
+- **`einvoice.onboarding`** — guide di configurazione per **ogni** preset:
+  passi ordinati, i campi credenziali che *quella* piattaforma vuole davvero, e
+  le avvertenze tenute fuori dall'elenco numerato. **Composte, non scritte**:
+  ogni preset nomina una sequenza di chiavi di passo e la sequenza è derivata
+  dai campi del preset, quindi una piattaforma aggiunta come voce di dizionario
+  arriva con la guida completa in tutte le lingue, e la guida non può divergere
+  dal preset che descrive.
+- **`einvoice.formats.catalog`** — cosa *è* ogni renderer, che la chiave del
+  registry non dice: sintassi sottostante, alias risolti (`zugferd` e `facturx`
+  producono gli stessi byte), profili nazionali (XRechnung, NLCIUS, CIUS-RO,
+  Factur-X, Chorus Pro), mime, opzioni del costruttore.
+  `renderers_for_country()` **esclude** il formato nazionale di un altro paese:
+  offrire FatturaPA a un cedente francese è offrire un rifiuto garantito.
+- **`ProviderPreset.setup_flags`** e **`.incompatible_national_format`** — i
+  fatti che nessuna tupla di credenziali rivela: credenziali a contratto,
+  OAuth2, certificato qualificato; e il canale che accetta *solo* una sintassi
+  nazionale che non generiamo (KSeF vuole `FA(2)`, FACe vuole
+  `Facturae 3.2.x`). Il secondo era sepolto in una nota in italiano.
+- **`einvoice.reference`** cresce di sei viste JSON-safe —
+  `provider_reference`, `all_provider_references` (filtrabile per paese e
+  categoria), `provider_kind_reference`, `renderer_reference`,
+  `all_renderer_references`, `locale_reference` — così una schermata di setup
+  ha un import solo.
+- **CLI**: `providers <key> --setup --lang xx`, `renderers` (ora descrive
+  invece di elencare, con `--country` e `--lang`), `locales`.
+
+### Fixed
+
+- `einvoice renderers` stampava sei righe di cui tre alias della stessa classe,
+  senza dire quali. Era esattamente la lista che i prodotti mettevano davanti a
+  un operatore: «scegli un formato» significava scegliere fra due grafie di CII
+  e sperare.
+- La guida di KSeF non si contraddice più: dove il canale rifiuta ciò che
+  generiamo, il passo «questa piattaforma vuole UBL» sparisce e resta
+  l'avvertenza, che è l'affermazione vera.
+- Ai portali nazionali non viene più detto di «chiedere l'attivazione delle
+  API, di solito spente sui piani base»: è una frase vera su un fornitore e
+  falsa su un canale statale.
+
+### Note
+
+Nessuna modifica ai formati, ai profili paese o ai trasporti: il rendering, la
+validazione e l'invio di 0.5.0 sono invariati byte per byte.
+
 ## [0.5.0] — 2026-08-24
 
 The release that makes the package usable **anywhere**: the EU-27, the UK,

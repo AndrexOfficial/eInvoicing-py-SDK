@@ -125,6 +125,45 @@ Tabella `einvoice_submissions(fiscal_document_id, format, channel, provider_id,
 sdi_id, state, filename, audit JSONB, created_at)` + un worker che fa polling di
 `fetch_status` / consuma i webhook e applica le `Notification` al `Lifecycle`.
 
+## 5. La schermata di setup
+
+La parte che le integrazioni sbagliano quasi sempre non è il rendering: è il
+form. Entrambi i prodotti che incorporano il pacchetto mostravano un elenco di
+chiavi di registro grezze (`wolters_kluwer`) e gli **stessi cinque input** per
+ogni fornitore, così «configura Fatture in Cloud» significava compilare un
+*Base URL* che non usa e lasciare vuoto il *Company ID* senza cui non funziona.
+
+Il pacchetto conosce la forma delle credenziali di ogni preset e ne spedisce le
+istruzioni in 31 lingue, quindi la schermata si costruisce da qui:
+
+```python
+from einvoice.reference import (
+    all_provider_references,   # elenco + guide, filtrabile per paese/categoria
+    provider_reference,        # una piattaforma
+    provider_kind_reference,   # le categorie, etichettate
+    all_renderer_references,   # i formati, alias collassati
+    locale_reference,          # lingue disponibili + default per paese
+)
+
+@router.get("/fiscal/providers")
+async def providers(locale: str | None = None):
+    return {"providers": [provider_reference(k, locale) for k in SUPPORTED],
+            "kinds": provider_kind_reference(locale)}
+```
+
+Ogni voce porta con sé `credentials` (label, hint, `secret`), `steps`,
+`caveats`, `capabilities` e `labels` per la cornice — quindi il frontend
+**itera**, non decide. Due regole che valgono la pena di rispettare:
+
+- Offri solo ciò che il tuo storage accetta davvero. Se `provider_kind` è un
+  enum del database, una voce in più nel picker è una voce che fallisce al
+  salvataggio.
+- Non ripiegare sul «primo della lista» quando il valore salvato non c'è più:
+  il form mostrerebbe i campi di un fornitore mentre lo stato ne dichiara un
+  altro, e salverebbe le credenziali dell'uno sotto il nome dell'altro.
+
+Dettagli, ordine dei passi e garanzie di traduzione: [SETUP.md](SETUP.md).
+
 ## Checklist
 
 - [ ] `to_invoice(...)` (mappa dati → `Invoice`)
@@ -133,3 +172,5 @@ sdi_id, state, filename, audit JSONB, created_at)` + un worker che fa polling di
 - [ ] worker notifiche/polling → `lifecycle.apply(notification)`
 - [ ] firma (delega al portale o `Signer`) + conservazione (`ArchiveStore`)
 - [ ] test in `sandbox=True` prima della produzione
+- [ ] schermata di setup costruita da `einvoice.reference` (niente elenchi di
+      fornitori né label di credenziali scritti a mano nel frontend)

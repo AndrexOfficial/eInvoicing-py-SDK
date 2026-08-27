@@ -12,6 +12,8 @@ transport would send.
     python -m einvoice sign fattura.xml --p12 cert.p12 --passphrase ...
     python -m einvoice countries IT
     python -m einvoice transports
+    python -m einvoice providers aruba --setup --lang de
+    python -m einvoice renderers --country FR --lang fr
 
 Exit codes: ``0`` success, ``1`` invalid input (validation, bad JSON, signing
 failure), ``2`` CLI usage error. That split matters in CI — a rejected invoice
@@ -35,6 +37,7 @@ from .countries import (
 )
 from .errors import EInvoiceError
 from .formats import available_renderers, get_renderer
+from .i18n import available_locales
 from .parsing import compare_declared_totals, detect_standard, parse_invoice
 from .rates import (
     NO_NATIONAL_VAT,
@@ -321,6 +324,9 @@ def cmd_rules(args) -> int:
 
 def cmd_providers(args) -> int:
     """List the e-invoicing platforms with a ready-made preset."""
+    if args.key and args.setup:
+        return _print_setup_guide(args.key, args.lang)
+
     if args.key:
         preset = preset_for(args.key)
         print(json.dumps({
@@ -333,6 +339,8 @@ def cmd_providers(args) -> int:
             "base_url": preset.base_url, "sandbox_url": preset.sandbox_url,
             "endpoints_verified": preset.endpoints_verified,
             "docs": preset.docs_url, "extra_defaults": preset.extra,
+            "setup_flags": list(preset.setup_flags),
+            "incompatible_national_format": preset.incompatible_national_format,
             "notes": preset.notes,
         }, indent=2, ensure_ascii=False))
         return EXIT_OK
@@ -368,8 +376,78 @@ def cmd_transports(_args) -> int:
     return EXIT_OK
 
 
-def cmd_renderers(_args) -> int:
-    print("\n".join(available_renderers()))
+def _print_setup_guide(key: str, lang: str | None) -> int:
+    """The human-readable form of :func:`einvoice.onboarding.setup_guide`.
+
+    Printed rather than dumped as JSON because this is the one CLI output meant
+    to be *read* — it is the same text a host would put on its settings screen,
+    and seeing it here is how you check a new preset before shipping it.
+    """
+    from .onboarding import setup_guide
+
+    guide = setup_guide(key, lang)
+    labels = guide["labels"]
+    print(f"{guide['name']}  [{guide['key']}]")
+    print(f"{labels['category']}: {guide['kind_label']}")
+    print(f"{labels['markets']}: {', '.join(guide['countries'])}")
+    print(f"{labels['format']}: {guide['renderer_syntax']}  ({guide['renderer']})")
+    print(f"{labels['capabilities']}: {', '.join(c['label'] for c in guide['capabilities'])}")
+    print(f"{guide['verification_label']}")
+    if guide["docs_url"]:
+        print(f"{labels['documentation']}: {guide['docs_url']}")
+
+    print(f"\n{labels['credentials']}")
+    for field in guide["credentials"]:
+        secret = " ***" if field["secret"] else ""
+        print(f"  · {field['key']}{secret} — {field['label']}")
+        if field["hint"]:
+            print(f"      {field['hint']}")
+
+    print(f"\n{labels['steps']}")
+    for n, step in enumerate(guide["steps"], 1):
+        print(f"  {n}. {step['text']}")
+
+    if guide["caveats"]:
+        print(f"\n{labels['caveats']}")
+        for caveat in guide["caveats"]:
+            print(f"  ! {caveat['text']}")
+    if guide["notes"]:
+        print(f"\n[{guide['notes_language']}] {guide['notes']}")
+    return EXIT_OK
+
+
+def cmd_renderers(args) -> int:
+    """Describe the document formats, not just name them.
+
+    The bare registry keys are six strings of which three are aliases, so the
+    old one-per-line listing could not tell you that ``zugferd`` and ``facturx``
+    build the same bytes — which is the only question the list gets asked.
+    """
+    from .reference import all_renderer_references, renderer_reference
+
+    lang = getattr(args, "lang", None)
+    if getattr(args, "key", None):
+        print(json.dumps(renderer_reference(args.key, lang), indent=2, ensure_ascii=False))
+        return EXIT_OK
+
+    specs = all_renderer_references(lang, country=getattr(args, "country", None))
+    for spec in specs:
+        alias = f"  (= {', '.join(spec['aliases'])})" if spec["aliases"] else ""
+        print(f"{spec['key']:<10} {spec['syntax']:<32} {', '.join(spec['countries'])}{alias}")
+        print(f"           {spec['description']}")
+        for profile in spec["profiles"]:
+            where = f" [{', '.join(profile['countries'])}]" if profile["countries"] else ""
+            print(f"           · {profile['name']}{where}")
+    if not getattr(args, "country", None):
+        print(f"\nAlias risolti: {', '.join(sorted(set(available_renderers())))}")
+    return EXIT_OK
+
+
+def cmd_locales(_args) -> int:
+    """Languages the setup labels come in."""
+    from .reference import locale_reference
+
+    print(json.dumps(locale_reference(), indent=2, ensure_ascii=False))
     return EXIT_OK
 
 
@@ -437,6 +515,10 @@ def build_parser() -> argparse.ArgumentParser:
     providers.add_argument("key", nargs="?", help="dettaglio di una piattaforma")
     providers.add_argument("--country", help="filtra per paese (es. IT, FR, CH)")
     providers.add_argument("--kind", help="filtra per categoria (vedi --kinds)")
+    providers.add_argument("--setup", action="store_true",
+                           help="istruzioni di configurazione per quella piattaforma")
+    providers.add_argument("--lang", default=None, choices=available_locales(),
+                           help="lingua delle etichette (default: en)")
     providers.add_argument("--kinds", action="store_true",
                            help="elenca le categorie disponibili")
     providers.set_defaults(func=cmd_providers)
@@ -447,7 +529,14 @@ def build_parser() -> argparse.ArgumentParser:
     countries.set_defaults(func=cmd_countries)
 
     sub.add_parser("transports", help="elenca i canali di trasmissione").set_defaults(func=cmd_transports)
-    sub.add_parser("renderers", help="elenca i renderer disponibili").set_defaults(func=cmd_renderers)
+    renderers = sub.add_parser("renderers", help="descrive i formati documentali disponibili")
+    renderers.add_argument("key", nargs="?", help="dettaglio di un formato in JSON")
+    renderers.add_argument("--country", help="solo i formati accettati in quel paese (es. FR)")
+    renderers.add_argument("--lang", default=None, choices=available_locales(),
+                           help="lingua delle etichette (default: en)")
+    renderers.set_defaults(func=cmd_renderers)
+
+    sub.add_parser("locales", help="lingue disponibili per le etichette di setup").set_defaults(func=cmd_locales)
     return parser
 
 

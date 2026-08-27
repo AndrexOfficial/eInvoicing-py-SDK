@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "einvoice"
-version = "0.5.0"
+version = "0.6.0"
 description = "Standalone, reusable e-invoicing engine for the EU-27, the UK, Switzerland and the US: EN 16931 in both syntaxes (UBL Peppol BIS 3.0 and UN/CEFACT CII for Factur-X / ZUGFeRD / Chorus Pro) plus FatturaPA/SdI, national CIUS selection (XRechnung, NLCIUS, CIUS-RO), 30 country profiles with check-digit tax-id validation and e-invoicing regime data, CAdES (.p7m) signing, conservation export, and presets for 25 platforms (Fiscozen, Storecove, Aruba, FattureInCloud, Chorus Pro, …)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -89,6 +89,11 @@ ignore = [
 # Test files legitimately use throwaway lambdas, single-letter loop vars, and
 # imports placed next to the case they support.
 "tests/*" = ["E501", "E402", "E731", "E741", "RUF015"]
+# The translation catalog is one sentence per line in thirty-one languages.
+# Wrapping a sentence across two source lines to satisfy a column limit makes
+# it harder to read and to diff, and diffing translations line-for-line is the
+# only way a review of them is tractable.
+"src/einvoice/i18n.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

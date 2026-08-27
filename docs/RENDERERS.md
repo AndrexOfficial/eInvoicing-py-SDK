@@ -4,10 +4,38 @@ Un renderer trasforma il modello neutro `Invoice` nei byte di uno standard.
 
 ```python
 from einvoice.formats import get_renderer, available_renderers
-available_renderers()                  # ['fatturapa', 'peppol', 'ubl']
+available_renderers()   # ['cii', 'facturx', 'fatturapa', 'peppol', 'ubl', 'zugferd']
 doc = get_renderer("fatturapa").render(invoice)   # RenderedDocument
 doc.standard, doc.mime, doc.filename, doc.content  # 'fatturapa', 'application/xml', 'IT..._00001.xml', b'<?xml...'
 ```
+
+Quelle sei stringhe bastano a **costruire** un renderer e non bastano a
+**sceglierlo**: tre delle sei sono alias della stessa classe, e la differenza
+fra le altre tre è la differenza fra un documento accettato e uno respinto
+all'ingresso. Per scegliere c'è il catalogo:
+
+```bash
+einvoice renderers                 # descrizione, profili nazionali, alias risolti
+einvoice renderers --country FR    # solo ciò che un destinatario francese accetta
+einvoice renderers cii --lang de   # dettaglio in JSON
+```
+
+```python
+from einvoice.formats.catalog import renderer_spec, renderers_for_country
+
+renderer_spec("zugferd").standard          # 'cii' — l'alias risolto
+renderer_spec("ubl").profiles              # Peppol BIS, XRechnung, NLCIUS, CIUS-RO
+[s.key for s in renderers_for_country("FR")]   # ['ubl', 'cii']
+```
+
+`renderers_for_country` **esclude** il formato nazionale di un altro paese:
+FatturaPA non compare per un cedente francese. Lì non è una scelta peggiore, è
+un rifiuto garantito, e un selettore che elenca rifiuti garantiti è un
+selettore che verrà usato per farne uno.
+
+Nomi e descrizioni localizzati (31 lingue) in [SETUP.md](SETUP.md);
+`einvoice.reference.all_renderer_references(locale, country=...)` li serve già
+pronti per JSON.
 
 Interfaccia:
 

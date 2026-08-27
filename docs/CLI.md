@@ -31,8 +31,10 @@ python -m einvoice --help   # equivalente, senza dipendere dal PATH
 | `countries [CODE]` | Elenca o descrive i profili paese: formato, rete, obblighi B2G/B2B, forza della validazione, aliquote (`--tax-id` per verificarne uno) |
 | `rates CC` | Aliquote IVA di un paese e cosa coprono (`--category` per una sola) |
 | `rules CC` | Obblighi non-aliquota: conservazione, soglie, termini, reverse charge |
-| `providers [KEY]` | Piattaforme di e-invoicing (`--country`, `--kind`, `--kinds`) |
-| `transports` / `renderers` | Elenca canali e formati registrati |
+| `providers [KEY]` | Piattaforme di e-invoicing (`--country`, `--kind`, `--kinds`, `--setup`, `--lang`) |
+| `transports` | Elenca i canali registrati |
+| `renderers [KEY]` | Descrive i formati documentali (`--country`, `--lang`) |
+| `locales` | Lingue disponibili per le etichette di setup |
 
 `FILE` può essere `-` per leggere da stdin, così la CLI si compone in pipeline.
 
@@ -73,6 +75,8 @@ einvoice check fattura.json
 einvoice countries CH
 einvoice providers --country CH
 einvoice providers --kinds
+einvoice providers aruba --setup --lang de   # istruzioni di configurazione
+einvoice renderers --country FR --lang fr    # i formati che la Francia accetta
 
 # Il ciclo passivo: cosa è arrivato, e se i conti tornano
 einvoice inspect ricevuta.xml

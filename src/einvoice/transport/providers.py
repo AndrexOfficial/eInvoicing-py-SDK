@@ -94,6 +94,19 @@ class ProviderPreset:
     #: See the module docstring — this is the honest bit.
     endpoints_verified: bool = False
     notes: str = ""
+    #: Facts about getting in the door that no credential tuple reveals:
+    #: ``contract`` (credentials come with a signature, not a signup form),
+    #: ``oauth2`` (register an application, not a static key), ``certificate``
+    #: (the connection itself needs a qualified certificate). Read by
+    #: :mod:`einvoice.onboarding` to build the setup guide; see
+    #: :data:`~einvoice.onboarding.SETUP_FLAGS`.
+    setup_flags: tuple[str, ...] = ()
+    #: Set when the channel accepts ONLY a national syntax this package does
+    #: not generate — ``"FA(2)"`` for KSeF, ``"Facturae 3.2.x"`` for FACe.
+    #: Stated as a field rather than left inside ``notes`` because it is the
+    #: one fact that decides whether the preset is usable at all, and a warning
+    #: only an Italian reader can find is a warning that gets missed.
+    incompatible_national_format: str | None = None
 
     @property
     def country(self) -> str:
@@ -147,7 +160,7 @@ class ProviderPreset:
 
 def _hub(key, name, countries, *, kind="access_point", creds=("api_key",), docs="",
          extra=None, renderer="ubl", base_url=None, supports=("send", "status"),
-         notes="") -> ProviderPreset:
+         notes="", setup_flags=(), national_format=None) -> ProviderPreset:
     """A preset running on the configurable REST hub — the honest default for a
     platform whose exact paths we have not called ourselves."""
     return ProviderPreset(
@@ -156,6 +169,7 @@ def _hub(key, name, countries, *, kind="access_point", creds=("api_key",), docs=
         transport="hub", kind=kind, renderer=renderer, credentials=creds,
         supports=tuple(supports), base_url=base_url, docs_url=docs,
         extra=extra or {}, endpoints_verified=False, notes=notes,
+        setup_flags=tuple(setup_flags), incompatible_national_format=national_format,
     )
 
 
@@ -210,7 +224,8 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         "notartel", "Notartel", "IT", kind="sdi_intermediary", renderer="fatturapa",
         creds=("username", "password"), extra={"auth_scheme": "basic"},
         docs="https://www.notartel.it/",
-        notes="Richiede un contratto di intermediazione notarile."),
+        notes="Richiede un contratto di intermediazione notarile.",
+        setup_flags=("contract",)),
     "wolters_kluwer": _hub(
         "wolters_kluwer", "Wolters Kluwer Fattura SMART", "IT",
         kind="sdi_intermediary", renderer="fatturapa",
@@ -220,7 +235,8 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         "agyo", "Agyo (TeamSystem)", "IT", kind="sdi_intermediary",
         renderer="fatturapa", docs="https://agyo.io/",
         supports=("send", "status", "receive"),
-        notes="Piattaforma TeamSystem; API a contratto."),
+        notes="Piattaforma TeamSystem; API a contratto.",
+        setup_flags=("contract",)),
     "namirial": _hub(
         "namirial", "Namirial", "IT", kind="sdi_intermediary", renderer="fatturapa",
         docs="https://www.namirial.it/",
@@ -233,12 +249,14 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
     "credemtel": _hub(
         "credemtel", "Credemtel", "IT", kind="sdi_intermediary", renderer="fatturapa",
         docs="https://www.credemtel.it/",
-        notes="Intermediario del gruppo Credem; diffuso nel manifatturiero."),
+        notes="Intermediario del gruppo Credem; diffuso nel manifatturiero.",
+        setup_flags=("contract",)),
     "passepartout": _hub(
         "passepartout", "Passepartout", "IT", kind="accounting_platform",
         renderer="fatturapa", docs="https://www.passepartout.net/",
         supports=("send", "status", "receive"),
-        notes="Gestionale con SdI integrato; API disponibile a contratto."),
+        notes="Gestionale con SdI integrato; API disponibile a contratto.",
+        setup_flags=("contract",)),
     "danea": _hub(
         "danea", "Danea Easyfatt", "IT", kind="accounting_platform",
         renderer="fatturapa", docs="https://www.danea.it/",
@@ -259,11 +277,13 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
     "pagero": _hub(
         "pagero", "Pagero", "global", docs="https://www.pagero.com/",
         supports=("send", "status", "receive"),
-        notes="Rete globale; onboarding e credenziali a contratto."),
+        notes="Rete globale; onboarding e credenziali a contratto.",
+        setup_flags=("contract",)),
     "basware": _hub(
         "basware", "Basware", "global", docs="https://www.basware.com/",
         supports=("send", "status", "receive"),
-        notes="Prevalentemente enterprise AP/AR."),
+        notes="Prevalentemente enterprise AP/AR.",
+        setup_flags=("contract",)),
     "tradeshift": _hub(
         "tradeshift", "Tradeshift", "global", docs="https://developers.tradeshift.com/",
         supports=("send", "status", "receive"),
@@ -332,16 +352,19 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         supports=("send", "receive"),
         notes="Standard di fatto fra i commercialisti tedeschi: qualunque "
               "integrazione B2B in Germania prima o poi ci passa. API a "
-              "contratto, OAuth2."),
+              "contratto, OAuth2.",
+        setup_flags=("contract", "oauth2")),
     "sap_business_network": _hub(
         "sap_business_network", "SAP Business Network (Ariba)", "global",
         kind="accounting_platform", docs="https://help.sap.com/",
         supports=("send", "status", "receive"),
-        notes="Rete di fornitura enterprise; l'e-invoicing è un modulo."),
+        notes="Rete di fornitura enterprise; l'e-invoicing è un modulo.",
+        setup_flags=("contract",)),
     "seeburger": _hub(
         "seeburger", "SEEBURGER BIS", ("DE", "EU"), kind="compliance_suite",
         docs="https://www.seeburger.com/", supports=("send", "status", "receive"),
-        notes="Piattaforma EDI/integrazione tedesca con modulo e-invoicing."),
+        notes="Piattaforma EDI/integrazione tedesca con modulo e-invoicing.",
+        setup_flags=("contract",)),
     "comarch": _hub(
         "comarch", "Comarch e-Invoicing", ("PL", "DE", "EU"),
         kind="compliance_suite", docs="https://www.comarch.com/",
@@ -416,7 +439,8 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
     "coupa": _hub(
         "coupa", "Coupa", "global", kind="compliance_suite",
         docs="https://compass.coupa.com/", supports=("send", "status", "receive"),
-        notes="Business spend management; l'e-invoicing è parte del modulo AP."),
+        notes="Business spend management; l'e-invoicing è parte del modulo AP.",
+        setup_flags=("contract",)),
     "esker": _hub(
         "esker", "Esker", ("FR", "EU"), kind="compliance_suite",
         docs="https://www.esker.com/", supports=("send", "status", "receive"),
@@ -458,7 +482,8 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         supports=("send", "status", "receive"),
         notes="Portale B2G francese. Accetta CII/Factur-X e UBL — qui si "
               "renderizza CII di default. Autenticazione OAuth2 + certificato: "
-              "usare un connettore dedicato se serve mTLS."),
+              "usare un connettore dedicato se serve mTLS.",
+        setup_flags=("oauth2", "certificate")),
     "ksef": _hub(
         "ksef", "KSeF", ("PL",), kind="national_portal", renderer="ubl",
         base_url="https://ksef.mf.gov.pl/api",
@@ -466,26 +491,30 @@ PROVIDER_PRESETS: dict[str, ProviderPreset] = {
         supports=("send", "status", "receive"),
         notes="ATTENZIONE: KSeF accetta SOLO il formato nazionale FA(2), che "
               "NON è UBL. Questo pacchetto genera EN 16931 valido ma serve un "
-              "convertitore verso FA(2) prima dell'invio."),
+              "convertitore verso FA(2) prima dell'invio.",
+        setup_flags=("certificate",), national_format="FA(2)"),
     "efactura_anaf": _hub(
         "efactura_anaf", "e-Factura (ANAF)", ("RO",), kind="national_portal",
         renderer="ubl", base_url="https://api.anaf.ro/prod/FCTEL/rest",
         docs="https://mfinante.gov.ro/ro/web/efactura",
         supports=("send", "status", "receive"),
-        notes="CIUS-RO su UBL. OAuth2 con certificato qualificato."),
+        notes="CIUS-RO su UBL. OAuth2 con certificato qualificato.",
+        setup_flags=("oauth2", "certificate")),
     "face": _hub(
         "face", "FACe", ("ES",), kind="national_portal", renderer="ubl",
         docs="https://face.gob.es/", supports=("send", "status"),
         notes="ATTENZIONE: FACe richiede Facturae 3.2.x, un XML nazionale che "
               "NON è UBL. Serve un convertitore o un provider che lo produca "
-              "(es. B2Brouter, EDICOM, Voxel)."),
+              "(es. B2Brouter, EDICOM, Voxel).",
+        national_format="Facturae 3.2.x"),
     "digipoort": _hub(
         "digipoort", "Digipoort", ("NL",), kind="national_portal", renderer="ubl",
         docs="https://www.logius.nl/diensten/digipoort",
         supports=("send", "status"),
         notes="Canale B2G olandese (Logius). Richiede NLCIUS: renderizzare con "
               "renderer_for_country('NL', b2g=True). Autenticazione con "
-              "certificato PKIoverheid."),
+              "certificato PKIoverheid.",
+        setup_flags=("certificate",)),
     "nemhandel": _hub(
         "nemhandel", "Nemhandel", ("DK",), kind="national_portal", renderer="ubl",
         docs="https://nemhandel.dk/", supports=("send", "status", "receive"),

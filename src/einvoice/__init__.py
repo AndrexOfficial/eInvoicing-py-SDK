@@ -87,6 +87,14 @@ from .formats import (
     get_renderer,
     register_renderer,
 )
+from .i18n import (
+    DEFAULT_LOCALE,
+    LOCALES,
+    available_locales,
+    locale_for_country,
+    normalize_locale,
+    translate,
+)
 from .lifecycle import Lifecycle, LifecycleEvent, Notification
 from .models import (
     PEPPOL_EAS_BY_COUNTRY,
@@ -105,6 +113,12 @@ from .models import (
     WithholdingTax,
 )
 from .naming import sdi_filename, to_base36
+from .onboarding import (
+    SetupStep,
+    all_setup_guides,
+    credential_fields,
+    setup_guide,
+)
 from .parsing import (
     compare_declared_totals,
     detect_standard,
@@ -129,9 +143,15 @@ from .rates import (
 )
 from .reference import (
     all_country_references,
+    all_provider_references,
+    all_renderer_references,
     country_reference,
+    locale_reference,
     product_categories,
+    provider_kind_reference,
+    provider_reference,
     reference_metadata,
+    renderer_reference,
 )
 from .serde import (
     invoice_from_dict,
@@ -170,7 +190,7 @@ from .transport import (
     transport_for_provider,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     # domain
@@ -191,8 +211,15 @@ __all__ = [
     "CIUS_RO_CUSTOMIZATION",
     # signing + conservation
     "P12Signer", "sign_cades", "sign_filename", "inspect_p12", "SigningCertificate",
+    # reference views (JSON-safe, for a host's fiscal-setup UI)
     "country_reference", "all_country_references", "product_categories",
     "reference_metadata",
+    "provider_reference", "all_provider_references", "provider_kind_reference",
+    "renderer_reference", "all_renderer_references", "locale_reference",
+    # setup guides + localized labels
+    "SetupStep", "setup_guide", "all_setup_guides", "credential_fields",
+    "translate", "available_locales", "normalize_locale", "locale_for_country",
+    "LOCALES", "DEFAULT_LOCALE",
     "ConservationProvider", "WebhookConservationProvider", "build_conservation_package",
     # enums
     "DocumentType", "TransmissionFormat", "VatNature", "VatExigibility",

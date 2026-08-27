@@ -439,6 +439,38 @@ supportato solleva `KeyError`. Una schermata di setup sta *chiedendo* quali
 sono le regole, e un profilo generico spacciato per quelle del Portogallo è
 una risposta sbagliata con la bandiera giusta.
 
+### Fornitori, formati e istruzioni — in 31 lingue
+
+Lo stesso vale un livello sopra. Un elenco di fornitori scritto a mano nel
+frontend mostra chiavi di registro grezze (`wolters_kluwer`) e gli stessi
+cinque campi credenziali per tutti, quindi «configura Fatture in Cloud»
+significa compilare un *Base URL* che non usa e lasciare vuoto il *Company ID*
+senza cui non funziona.
+
+```python
+from einvoice.reference import all_provider_references, all_renderer_references
+
+guide = all_provider_references("pl", country="PL")[0]
+[f["key"] for f in guide["credentials"]]   # solo i campi che quel fornitore usa
+[s["text"] for s in guide["steps"]]        # istruzioni di setup, in polacco
+guide["caveats"]                           # e cosa ti morderà, separato
+
+all_renderer_references("de", country="DE")   # niente FatturaPA per un cedente DE
+```
+
+```bash
+einvoice providers fattureincloud --setup --lang de
+einvoice renderers --country FR --lang fr
+einvoice locales
+```
+
+Le guide sono **composte** dai preset, non scritte: una piattaforma aggiunta
+come voce di dizionario arriva con le istruzioni complete in tutte le lingue, e
+non possono divergere dal preset che descrivono. Le lingue sono quelle ufficiali
+dei trenta paesi profilati più le locale d'interfaccia dei prodotti ospitanti —
+un paese di cui dichiariamo le regole, in una lingua che i suoi contribuenti non
+leggono, è supportato a metà. Dettagli in [docs/SETUP.md](docs/SETUP.md).
+
 ## Documentazione
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — i 3 livelli, engine, stati, matrice EU, roadmap
@@ -450,6 +482,7 @@ una risposta sbagliata con la bandiera giusta.
 - [docs/COUNTRIES.md](docs/COUNTRIES.md) — matrice paese per paese: formati, obblighi, tax-id
 - [docs/TAXES.md](docs/TAXES.md) — aliquote IVA **per categoria di prodotto** e regole fiscali (conservazione, soglie, termini)
 - [docs/PROVIDERS.md](docs/PROVIDERS.md) — le 65 piattaforme e come collegarne una nuova
+- [docs/SETUP.md](docs/SETUP.md) — istruzioni di configurazione per ogni piattaforma e formato, in 31 lingue
 - [docs/PARSING.md](docs/PARSING.md) — leggere una fattura ricevuta: cosa sopravvive e cosa no
 - [docs/CORRECTIONS.md](docs/CORRECTIONS.md) — note di credito, note di debito e resi
 - [docs/SIGNING.md](docs/SIGNING.md) — firma CAdES, certificati, scadenze, conservazione
