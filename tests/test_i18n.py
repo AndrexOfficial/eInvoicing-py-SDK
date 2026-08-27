@@ -114,3 +114,19 @@ def test_available_locales_is_a_copy():
     first.append("xx")
 
     assert "xx" not in available_locales()
+
+
+def test_the_language_can_be_passed_by_keyword():
+    """It could not, and that was the worst failure this module can have: the
+    ``/`` marker sent ``locale="it"`` into ``**params`` and the call answered in
+    English, silently, with no error anywhere."""
+    assert translate("label.setup", locale="it") == translate("label.setup", "it") == "Configurazione"
+
+
+@pytest.mark.parametrize("key", translation_keys())
+def test_no_string_formats_the_arguments_of_translate_itself(key):
+    """``key`` is still positional-only, and ``locale`` is now a real parameter.
+    A catalog string carrying ``{key}`` or ``{locale}`` would collide with them
+    and reintroduce the bug from the other side."""
+    for text in _CATALOG[key].values():
+        assert not {"key", "locale"} & set(_PLACEHOLDER.findall(text)), key

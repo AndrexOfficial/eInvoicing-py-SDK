@@ -43,6 +43,12 @@ sessantacinque piattaforme» e «una persona riesce a configurarne una».
   ha un import solo.
 - **CLI**: `providers <key> --setup --lang xx`, `renderers` (ora descrive
   invece di elencare, con `--country` e `--lang`), `locales`.
+- **`label.optional`** e i campi `placeholder` / `optional_label` /
+  `required` su `credential_fields()`: `base_url` è sempre presente ed è
+  **facoltativo** dove l'host è noto. Ogni trasporto legge `config.base_url or
+  <default>`, quindi un valore fornito è un override vero; nasconderlo faceva
+  di `step.known_base_url` («lascia il campo vuoto, a meno che…») un
+  riferimento a un campo che non esisteva.
 
 ### Fixed
 
@@ -56,6 +62,15 @@ sessantacinque piattaforme» e «una persona riesce a configurarne una».
 - Ai portali nazionali non viene più detto di «chiedere l'attivazione delle
   API, di solito spente sui piani base»: è una frase vera su un fornitore e
   falsa su un canale statale.
+- **`translate(key, locale="it")` rispondeva in inglese, in silenzio.** Il
+  marcatore positional-only faceva finire `locale` dentro `**params`: nessun
+  errore, nessun avviso, solo la lingua sbagliata — il peggior modo di
+  sbagliare che questo modulo abbia. Ora solo `key` è posizionale, e un test
+  vieta i segnaposto `{key}`/`{locale}` che riaprirebbero il buco dall'altro
+  lato.
+- `einvoice providers --setup` senza piattaforma stampava la tabella normale,
+  facendo sembrare che la guida non avesse niente da dire. Ora è un errore
+  d'uso (exit 2).
 
 ### Note
 

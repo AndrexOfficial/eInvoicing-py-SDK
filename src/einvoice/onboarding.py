@@ -170,24 +170,37 @@ def setup_caveats(preset: ProviderPreset) -> list[SetupStep]:
 def credential_fields(preset: ProviderPreset, locale: str | None = DEFAULT_LOCALE) -> list[dict[str, Any]]:
     """The inputs this platform's form should show — and only those.
 
-    ``base_url`` is appended when the host is not knowable in advance, which is
-    why it is optional-looking in the presets and mandatory in practice: the
-    transport cannot be built without it.
+    ``base_url`` is always last and is the one field whose *requiredness*
+    varies. Where the host cannot be known in advance the transport cannot be
+    built without it; where a default exists, every transport in the package
+    still treats a supplied value as an override (``config.base_url or
+    _DEFAULT``), and an account moved to a dedicated host is exactly the
+    situation that needs one. It is therefore offered as **optional** rather
+    than hidden — which is also what makes ``step.known_base_url`` ("leave the
+    field empty unless…") an instruction instead of a reference to a control
+    that is not on screen.
+
+    ``placeholder`` carries the known host, so an operator can see what the
+    empty field will fall back to without being invited to retype it.
     """
     resolved = normalize_locale(locale)
     keys = list(preset.credentials)
-    if preset.needs_base_url and "base_url" not in keys:
+    if "base_url" not in keys:
         keys.append("base_url")
 
     fields: list[dict[str, Any]] = []
     for key in keys:
         stem = _CREDENTIAL_LABELS.get(key)
+        is_base_url = key == "base_url"
         fields.append({
             "key": key,
             "label": translate(stem, resolved) if stem else key,
             "hint": translate(f"{stem}.hint", resolved) if stem else None,
+            "placeholder": preset.base_url if is_base_url else None,
             "secret": key in _SECRET_CREDENTIALS,
-            "required": True,
+            "required": preset.needs_base_url if is_base_url else True,
+            "optional_label": None if (not is_base_url or preset.needs_base_url)
+                              else translate("label.optional", resolved),
         })
     return fields
 

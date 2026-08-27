@@ -330,3 +330,22 @@ def test_parsing_a_document_we_do_not_understand_fails_cleanly(tmp_path, capsys)
     assert main(["parse", str(junk)]) == EXIT_INVALID
     err = capsys.readouterr().err
     assert "errore:" in err and "Traceback" not in err
+
+
+def test_providers_setup_without_a_platform_is_a_usage_error(capsys):
+    """A flag that silently does nothing is worse than one that refuses: this
+    used to print the plain table, which reads as "the guide has nothing to
+    say" rather than "you forgot the argument"."""
+    from einvoice.cli import main
+
+    assert main(["providers", "--setup"]) == 2
+    assert "--setup" in capsys.readouterr().err
+
+
+def test_providers_setup_prints_the_guide_in_the_requested_language(capsys):
+    from einvoice.cli import main
+
+    assert main(["providers", "aruba", "--setup", "--lang", "sl"]) == 0
+    out = capsys.readouterr().out
+    assert "Posrednik SdI" in out          # kind label, translated
+    assert "step." not in out              # no raw catalog keys leaked

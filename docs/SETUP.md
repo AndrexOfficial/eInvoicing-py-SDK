@@ -55,6 +55,29 @@ Ordine dei passi (quelli che non si applicano spariscono):
 | 9 | `step.sandbox_url` / `step.sandbox_missing` | a seconda di `sandbox_url` |
 | 10 | `step.test_before_live` · `step.store_credentials` | sempre |
 
+## I campi credenziali
+
+`credential_fields()` restituisce **i campi**, non «i campi obbligatori». Ogni
+trasporto del pacchetto legge `config.base_url or <il proprio default>`, quindi
+un valore fornito è un override vero anche dove l'host è noto — ed è esattamente
+la situazione di un account spostato su un host dedicato.
+
+Perciò `base_url` c'è sempre, in fondo, ed è l'unico campo la cui
+**obbligatorietà** varia:
+
+| | `required` | `optional_label` | `placeholder` |
+|---|---|---|---|
+| host non conoscibile (InfoCert, Zucchetti, …) | `True` | `None` | `None` |
+| host noto (Aruba, Fatture in Cloud, …) | `False` | «facoltativo» tradotto | l'host di default |
+
+Nasconderlo del tutto quando l'host è noto sembrava più pulito e non lo era:
+`step.known_base_url` dice «lascia il campo vuoto, a meno che…», e un'istruzione
+che parla di un campo che non c'è è un riferimento al nulla. C'è un test che lega
+le due cose (`test_the_guide_never_points_at_a_field_the_form_does_not_render`).
+
+`placeholder` porta l'host di default: l'operatore vede su cosa ricadrà il campo
+vuoto senza essere invitato a riscriverlo.
+
 ## Passi e avvertenze sono due cose diverse
 
 Le **avvertenze** (`caveats`) stanno fuori dall'elenco numerato di proposito.

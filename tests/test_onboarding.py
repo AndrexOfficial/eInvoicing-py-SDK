@@ -78,18 +78,45 @@ def test_every_guide_is_json_safe_and_free_of_raw_keys(key):
 
 def test_credential_fields_show_only_what_the_platform_needs():
     """The bug this replaces: five inputs for every provider, of which two
-    applied. An operator filling a Base URL FattureInCloud does not use, and
-    skipping the Company ID it cannot work without, has been misled by the form."""
-    keys = [f["key"] for f in credential_fields(preset_for("fattureincloud"), "it")]
+    applied. An operator filling a Base URL as if it were mandatory, and
+    skipping the Company ID FattureInCloud cannot work without, has been misled
+    by the form."""
+    fields = credential_fields(preset_for("fattureincloud"), "it")
 
-    assert keys == ["api_key", "company_id"]
-    assert "base_url" not in keys       # its host is known
+    assert [f["key"] for f in fields] == ["api_key", "company_id", "base_url"]
+    assert [f["required"] for f in fields] == [True, True, False]
 
 
-def test_credential_fields_add_base_url_when_the_host_is_unknowable():
-    keys = [f["key"] for f in credential_fields(preset_for("infocert"), "it")]
+def test_a_known_host_makes_base_url_optional_not_absent():
+    """Every transport reads ``config.base_url or <its default>``, so a supplied
+    value is a real override — and ``step.known_base_url`` tells the operator to
+    leave the field empty, which is only an instruction if the field exists."""
+    base_url = next(f for f in credential_fields(preset_for("aruba"), "it")
+                    if f["key"] == "base_url")
 
-    assert keys[-1] == "base_url"
+    assert base_url["required"] is False
+    assert base_url["optional_label"] == "facoltativo"
+    assert base_url["placeholder"] == "https://ws.fatturazioneelettronica.aruba.it"
+
+
+def test_credential_fields_require_base_url_when_the_host_is_unknowable():
+    fields = credential_fields(preset_for("infocert"), "it")
+    base_url = fields[-1]
+
+    assert base_url["key"] == "base_url"
+    assert base_url["required"] is True
+    assert base_url["optional_label"] is None
+    assert base_url["placeholder"] is None
+
+
+@pytest.mark.parametrize("key", sorted(PROVIDER_PRESETS))
+def test_base_url_is_required_exactly_when_the_preset_cannot_default_it(key):
+    """The two facts must not drift: a field marked optional whose transport
+    then refuses to build is a form that lies about what it needs."""
+    preset = PROVIDER_PRESETS[key]
+    base_url = next(f for f in credential_fields(preset, "en") if f["key"] == "base_url")
+
+    assert base_url["required"] is preset.needs_base_url
 
 
 @pytest.mark.parametrize("key", sorted(PROVIDER_PRESETS))
@@ -191,3 +218,13 @@ def test_locale_reference_agrees_with_the_catalog():
 
     assert reference["locales"] == list(LOCALES)
     assert set(reference["default_by_country"].values()) <= set(LOCALES)
+
+
+def test_the_guide_never_points_at_a_field_the_form_does_not_render():
+    """``step.known_base_url`` says "leave the field empty"; a form without that
+    field turns the instruction into a reference to nothing."""
+    for key, preset in PROVIDER_PRESETS.items():
+        steps = {s.key for s in setup_steps(preset)}
+        fields = {f["key"] for f in credential_fields(preset, "en")}
+        if {"step.known_base_url", "step.ask_base_url"} & steps:
+            assert "base_url" in fields, key

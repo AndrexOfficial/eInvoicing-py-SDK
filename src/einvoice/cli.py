@@ -324,6 +324,13 @@ def cmd_rules(args) -> int:
 
 def cmd_providers(args) -> int:
     """List the e-invoicing platforms with a ready-made preset."""
+    if args.setup and not args.key:
+        # A flag that silently does nothing is worse than one that refuses:
+        # `providers --setup` used to print the plain table, which looks like
+        # the guide simply has nothing to say about any of them.
+        print("providers: --setup richiede una piattaforma, es. "
+              "`einvoice providers aruba --setup`", file=sys.stderr)
+        return EXIT_USAGE
     if args.key and args.setup:
         return _print_setup_guide(args.key, args.lang)
 
@@ -399,9 +406,12 @@ def _print_setup_guide(key: str, lang: str | None) -> int:
     print(f"\n{labels['credentials']}")
     for field in guide["credentials"]:
         secret = " ***" if field["secret"] else ""
-        print(f"  · {field['key']}{secret} — {field['label']}")
+        optional = f" ({field['optional_label']})" if field.get("optional_label") else ""
+        print(f"  · {field['key']}{secret} — {field['label']}{optional}")
         if field["hint"]:
             print(f"      {field['hint']}")
+        if field.get("placeholder"):
+            print(f"      → {field['placeholder']}")
 
     print(f"\n{labels['steps']}")
     for n, step in enumerate(guide["steps"], 1):

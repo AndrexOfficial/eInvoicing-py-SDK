@@ -111,8 +111,15 @@ def locale_for_country(code: str | None) -> str:
     return LOCALES_BY_COUNTRY.get((code or "").upper(), (DEFAULT_LOCALE,))[0]
 
 
-def translate(key: str, locale: str | None = DEFAULT_LOCALE, /, **params: object) -> str:
+def translate(key: str, /, locale: str | None = DEFAULT_LOCALE, **params: object) -> str:
     """One catalog string, formatted.
+
+    ``locale`` is deliberately NOT positional-only. It used to be, and that made
+    the natural spelling — ``translate("label.setup", locale="it")`` — swallow
+    the language into ``**params`` and silently answer in English. A wrong
+    language that raises nothing is the worst failure this module can have, so
+    only ``key`` stays positional-only (nothing formats ``{key}``; a test holds
+    that, and the same test forbids a ``{locale}`` placeholder).
 
     Falls back to English for a missing translation and returns ``key`` itself
     for a missing key — a visible ``step.unknown_thing`` in a UI is a bug report
@@ -1390,5 +1397,26 @@ _CATALOG.update({
         "ro": "Endpoint-uri de confirmat", "ru": "Эндпоинты требуют подтверждения",
         "sk": "Endpointy na overenie", "sl": "Končne točke za potrditev",
         "sv": "Endpoints att bekräfta", "th": "ต้องยืนยัน endpoint", "zh": "端点待确认",
+    },
+})
+
+# ── `label.optional` ──────────────────────────────────────────────────────
+#
+# Added when the credential list stopped being "the required fields" and became
+# "the fields": every transport treats ``base_url`` as an override of its own
+# default (``config.base_url or _DEFAULT``), so a preset with a known host
+# still accepts one — and `step.known_base_url` was already telling operators
+# to leave that field empty, which only reads as an instruction if the field is
+# there to leave empty.
+_CATALOG.update({
+    "label.optional": {
+        "ar": "اختياري", "bg": "по избор", "cs": "volitelné", "da": "valgfrit",
+        "de": "optional", "el": "προαιρετικό", "en": "optional", "es": "opcional",
+        "et": "valikuline", "fi": "valinnainen", "fil": "opsyonal", "fr": "facultatif",
+        "ga": "roghnach", "hr": "neobavezno", "hu": "opcionális", "id": "opsional",
+        "it": "facoltativo", "ja": "任意", "lt": "neprivaloma", "lv": "neobligāti",
+        "mt": "fakultattiv", "nl": "optioneel", "pl": "opcjonalne", "pt": "opcional",
+        "ro": "opțional", "ru": "необязательно", "sk": "voliteľné", "sl": "neobvezno",
+        "sv": "valfritt", "th": "ไม่บังคับ", "zh": "可选",
     },
 })
