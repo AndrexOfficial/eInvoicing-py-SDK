@@ -31,6 +31,7 @@ from .countries import (
     profile_for,
     supported_countries,
 )
+from .i18n import translate
 from .rates import COMMONLY_EXEMPT, NO_NATIONAL_VAT, RATES_VERIFIED_AS_OF, ProductCategory, rates_for
 
 __all__ = [
@@ -52,11 +53,29 @@ def _num(value: Decimal | None) -> str | None:
     return None if value is None else str(value)
 
 
-def _rates(code: str) -> list[dict[str, Any]]:
+def _label(prefix: str, value: str | None, locale: str | None) -> str | None:
+    """Il nome leggibile di un valore di vocabolario, o ``None`` se non c'è.
+
+    Restituire ``None`` invece del valore grezzo è deliberato: chi consuma deve
+    poter distinguere «non tradotto» da «tradotto», e un'etichetta che copia
+    l'identificatore è indistinguibile da un'etichetta mancante.
+    """
+    if not value:
+        return None
+    chiave = f"{prefix}.{value}"
+    tradotto = translate(chiave, locale)
+    return None if tradotto == chiave else tradotto
+
+
+def _rates(code: str, locale: str | None = None) -> list[dict[str, Any]]:
     return [
         {
             "rate": _num(r.rate),
             "kind": r.kind.value,
+            # Il valore resta: il codice ci si dirama sopra. Accanto c'è la
+            # parola che legge una persona — perché finora i prodotti
+            # stampavano «super_reduced» accanto a etichette tradotte.
+            "kind_label": _label("rate_kind", r.kind.value, locale),
             "categories": [c.value for c in r.categories],
             "note": r.note or None,
         }
@@ -64,8 +83,13 @@ def _rates(code: str) -> list[dict[str, Any]]:
     ]
 
 
-def country_reference(code: str) -> dict[str, Any]:
+def country_reference(code: str, locale: str | None = None) -> dict[str, Any]:
     """Everything a fiscal-setup screen needs for one country.
+
+    ``locale`` sceglie la lingua delle **etichette** (``kind_label``,
+    ``b2b_label``, ``b2g_label``): i valori accanto a cui stanno restano
+    invariati, perché sono identificatori su cui il codice si dirama. Omesso,
+    si ottiene l'inglese. Le lingue sono quelle di :mod:`einvoice.i18n`.
 
     Unlike :func:`profile_for`, this is **strict**. That function is
     deliberately permissive — it falls back to a generic profile so rendering
@@ -97,12 +121,14 @@ def country_reference(code: str) -> dict[str, Any]:
         "tax_id_pattern": p.tax_id_pattern,
         "default_standard": p.default_standard,
         "vat_rates": [_num(Decimal(r)) for r in p.vat_rates],
-        "rates": _rates(p.code),
+        "rates": _rates(p.code, locale),
         "no_national_vat": NO_NATIONAL_VAT.get(p.code),
         "regime": {
             "network": regime.network,
             "b2g": regime.b2g,
             "b2b": regime.b2b,
+            "b2g_label": _label("mandate", regime.b2g, locale),
+            "b2b_label": _label("mandate", regime.b2b, locale),
             "customization": regime.customization,
             "national_format": regime.national_format,
             "notes": regime.notes or None,
@@ -118,9 +144,9 @@ def country_reference(code: str) -> dict[str, Any]:
     }
 
 
-def all_country_references() -> list[dict[str, Any]]:
-    """Every supported country, sorted by code."""
-    return [country_reference(code) for code in sorted(supported_countries())]
+def all_country_references(locale: str | None = None) -> list[dict[str, Any]]:
+    """Every supported country, sorted by code. ``locale`` come sopra."""
+    return [country_reference(code, locale) for code in sorted(supported_countries())]
 
 
 def product_categories() -> list[dict[str, Any]]:

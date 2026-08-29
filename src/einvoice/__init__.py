@@ -190,7 +190,7 @@ from .transport import (
     transport_for_provider,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     # domain

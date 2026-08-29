@@ -118,6 +118,15 @@ Due regole nella conversione:
   sconosciuto; questa risponde alla domanda «quali sono le regole qui», dove
   un profilo generico spacciato per quelle del Portogallo è peggio di un
   `KeyError`.
+- **I valori di vocabolario viaggiano con la loro parola.** `country_reference(code,
+  locale)` affianca `kind_label` a ogni aliquota e `b2b_label` / `b2g_label` al
+  regime, nelle trentuno lingue di `einvoice.i18n`. L'identificatore **resta**:
+  `kind` è ciò su cui il codice si dirama, `kind_label` è ciò che legge una
+  persona. Prima di questo i due prodotti stampavano `super_reduced` accanto a
+  etichette tradotte, e si erano poi costruiti ciascuno la propria tabella —
+  la stessa divergenza che questo modulo era nato per chiudere. Un'etichetta
+  che manca torna `None`, mai l'identificatore: altrimenti «non tradotto» e
+  «tradotto» diventano indistinguibili.
 
 ## Europa: EN 16931, PEPPOL, CIUS
 

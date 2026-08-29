@@ -4,6 +4,40 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-08-29
+
+Il vocabolario del pacchetto smette di arrivare grezzo sugli schermi.
+
+### Added
+
+- **`rate_kind.*` e `mandate.*` nel catalogo i18n**, trentuno lingue come il
+  resto: `standard`, `reduced`, `super_reduced`, `parking`, `zero` e
+  `mandatory`, `voluntary`, `phased`. Il vocabolario è quello della direttiva
+  IVA, che è pubblicata in tutte le lingue ufficiali dell'Unione — quindi sono
+  ricerche, non invenzioni.
+- **`country_reference(code, locale)` e `all_country_references(locale)`**
+  aggiungono `kind_label` a ogni aliquota e `b2b_label` / `b2g_label` al
+  regime. Il parametro è opzionale e omesso dà inglese: la firma resta
+  compatibile.
+
+### Why
+
+I due prodotti che incorporano il pacchetto stampavano questi valori così
+com'erano: «22% · super_reduced» accanto a etichette tradotte in quattordici
+lingue, «mandatory» sotto un'intestazione che diceva *Obbligo B2B*. Ognuno si
+era poi costruito la propria tabella di traduzioni — che è esattamente il modo
+in cui due parole polacche diverse per l'aliquota ridotta finiscono in due basi
+di codice che dovrebbero concordare, com'era già successo alla tabella dei
+paesi prima che esistesse `einvoice.reference`.
+
+**L'identificatore resta accanto all'etichetta.** `kind` è ciò su cui il codice
+si dirama, `kind_label` è ciò che legge una persona: sostituire il primo col
+secondo era la modifica facile e quella sbagliata.
+
+Un'etichetta assente torna `None` e non l'identificatore, perché chi consuma
+deve poter distinguere «non tradotto» da «tradotto» — un'etichetta che copia la
+chiave è indistinguibile da un'etichetta mancante.
+
 ## [0.6.0] — 2026-08-27
 
 Il rilascio che riempie il buco fra «il pacchetto sa parlare con

@@ -1528,3 +1528,97 @@ _CATALOG.update({
         "zh": "此通道不会自动返回状态：SdI 的回执会送到你发出的地方，需要人工记录。",
     },
 })
+
+# ── how a VAT rate and a mandate are *called* ─────────────────────────────
+#
+# Both products printed these straight from the data: "22% · super_reduced"
+# next to labels translated into fourteen languages, and "mandatory" under
+# "Obbligo B2B". The value is an identifier — code branches on it — so it
+# stays; what was missing is the word a person reads. Keeping the pair here
+# means the two products cannot drift into two different Polish words for the
+# reduced rate, which is exactly what happened to the country table before
+# ``einvoice.reference`` existed.
+#
+# The vocabulary is the VAT Directive's own, which is published in every
+# official language of the Union — so these are lookups, not inventions.
+_CATALOG.update({
+    "rate_kind.standard": {
+        "ar": "قياسية", "bg": "стандартна", "cs": "základní", "da": "normalsats",
+        "de": "Normalsatz", "el": "κανονικός", "en": "standard", "es": "general",
+        "et": "harilik", "fi": "yleinen", "fil": "karaniwan", "fr": "normal",
+        "ga": "caighdeánach", "hr": "standardna", "hu": "általános", "id": "standar",
+        "it": "ordinaria", "ja": "標準税率", "lt": "standartinis", "lv": "standarta",
+        "mt": "standard", "nl": "normaal", "pl": "podstawowa", "pt": "normal", "ro": "standard",
+        "ru": "стандартная", "sk": "základná", "sl": "splošna", "sv": "normalskatt",
+        "th": "มาตรฐาน", "zh": "标准税率",
+    },
+    "rate_kind.reduced": {
+        "ar": "مخفضة", "bg": "намалена", "cs": "snížená", "da": "nedsat", "de": "ermäßigt",
+        "el": "μειωμένος", "en": "reduced", "es": "reducido", "et": "vähendatud",
+        "fi": "alennettu", "fil": "nabawasan", "fr": "réduit", "ga": "laghdaithe",
+        "hr": "snižena", "hu": "kedvezményes", "id": "rendah", "it": "ridotta", "ja": "軽減税率",
+        "lt": "lengvatinis", "lv": "samazināta", "mt": "imnaqqsa", "nl": "verlaagd",
+        "pl": "obniżona", "pt": "reduzida", "ro": "redusă", "ru": "пониженная", "sk": "znížená",
+        "sl": "nižja", "sv": "reducerad", "th": "ลดหย่อน", "zh": "减免税率",
+    },
+    "rate_kind.super_reduced": {
+        "ar": "شديدة الانخفاض", "bg": "свръхнамалена", "cs": "super snížená",
+        "da": "supernedsat", "de": "stark ermäßigt", "el": "υπερμειωμένος",
+        "en": "super-reduced", "es": "superreducido", "et": "eriti vähendatud",
+        "fi": "erittäin alennettu", "fil": "lubhang nabawasan", "fr": "super-réduit",
+        "ga": "sár-laghdaithe", "hr": "super snižena", "hu": "különösen kedvezményes",
+        "id": "sangat rendah", "it": "super-ridotta", "ja": "超軽減税率", "lt": "itin lengvatinis",
+        "lv": "īpaši samazināta", "mt": "superimnaqqsa", "nl": "sterk verlaagd",
+        "pl": "super obniżona", "pt": "super-reduzida", "ro": "super-redusă",
+        "ru": "сверхпониженная", "sk": "super znížená", "sl": "posebno nižja",
+        "sv": "kraftigt reducerad", "th": "ลดหย่อนพิเศษ", "zh": "超低税率",
+    },
+    "rate_kind.parking": {
+        "ar": "انتقالية", "bg": "преходна", "cs": "přechodná", "da": "overgangssats",
+        "de": "Parksatz", "el": "μεταβατικός", "en": "parking", "es": "de aparcamiento",
+        "et": "üleminekumäär", "fi": "siirtymäkauden", "fil": "transisyonal", "fr": "parking",
+        "ga": "idirthréimhseach", "hr": "prijelazna", "hu": "átmeneti", "id": "transisi",
+        "it": "parcheggio", "ja": "経過税率", "lt": "pereinamojo laikotarpio", "lv": "pārejas",
+        "mt": "tranżitorja", "nl": "overgangstarief", "pl": "przejściowa", "pt": "parking",
+        "ro": "de tranziție", "ru": "переходная", "sk": "prechodná", "sl": "prehodna",
+        "sv": "övergångsskatt", "th": "เปลี่ยนผ่าน", "zh": "过渡税率",
+    },
+    "rate_kind.zero": {
+        "ar": "صفرية", "bg": "нулева", "cs": "nulová", "da": "nulsats", "de": "Nullsatz",
+        "el": "μηδενικός", "en": "zero", "es": "cero", "et": "nullmäär", "fi": "nollaverokanta",
+        "fil": "sero", "fr": "zéro", "ga": "nialasach", "hr": "nulta", "hu": "nulla",
+        "id": "nol", "it": "zero", "ja": "ゼロ税率", "lt": "nulinis", "lv": "nulles", "mt": "żero",
+        "nl": "nultarief", "pl": "zerowa", "pt": "zero", "ro": "zero", "ru": "нулевая",
+        "sk": "nulová", "sl": "ničelna", "sv": "nollskattesats", "th": "ศูนย์", "zh": "零税率",
+    },
+    "mandate.mandatory": {
+        "ar": "إلزامية", "bg": "задължително", "cs": "povinné", "da": "obligatorisk",
+        "de": "verpflichtend", "el": "υποχρεωτική", "en": "mandatory", "es": "obligatoria",
+        "et": "kohustuslik", "fi": "pakollinen", "fil": "sapilitan", "fr": "obligatoire",
+        "ga": "éigeantach", "hr": "obvezno", "hu": "kötelező", "id": "wajib",
+        "it": "obbligatoria", "ja": "義務", "lt": "privaloma", "lv": "obligāta",
+        "mt": "obbligatorja", "nl": "verplicht", "pl": "obowiązkowa", "pt": "obrigatória",
+        "ro": "obligatorie", "ru": "обязательна", "sk": "povinné", "sl": "obvezno",
+        "sv": "obligatorisk", "th": "บังคับ", "zh": "强制",
+    },
+    "mandate.voluntary": {
+        "ar": "اختيارية", "bg": "доброволно", "cs": "dobrovolné", "da": "frivillig",
+        "de": "freiwillig", "el": "προαιρετική", "en": "voluntary", "es": "voluntaria",
+        "et": "vabatahtlik", "fi": "vapaaehtoinen", "fil": "kusang-loob", "fr": "facultative",
+        "ga": "deonach", "hr": "dobrovoljno", "hu": "önkéntes", "id": "sukarela",
+        "it": "facoltativa", "ja": "任意", "lt": "savanoriška", "lv": "brīvprātīga",
+        "mt": "volontarja", "nl": "vrijwillig", "pl": "dobrowolna", "pt": "voluntária",
+        "ro": "voluntară", "ru": "добровольна", "sk": "dobrovoľné", "sl": "prostovoljno",
+        "sv": "frivillig", "th": "สมัครใจ", "zh": "自愿",
+    },
+    "mandate.phased": {
+        "ar": "تدريجية", "bg": "поетапно", "cs": "postupné", "da": "gradvis",
+        "de": "schrittweise", "el": "σταδιακή", "en": "phased", "es": "gradual",
+        "et": "järkjärguline", "fi": "vaiheittainen", "fil": "unti-unti", "fr": "progressive",
+        "ga": "céimnithe", "hr": "postupno", "hu": "fokozatos", "id": "bertahap",
+        "it": "graduale", "ja": "段階的", "lt": "laipsniška", "lv": "pakāpeniska",
+        "mt": "gradwali", "nl": "gefaseerd", "pl": "stopniowa", "pt": "faseada",
+        "ro": "etapizată", "ru": "поэтапная", "sk": "postupné", "sl": "postopno",
+        "sv": "stegvis", "th": "ทยอยบังคับใช้", "zh": "分阶段",
+    },
+})
