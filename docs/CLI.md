@@ -35,6 +35,9 @@ python -m einvoice --help   # equivalente, senza dipendere dal PATH
 | `transports` | Elenca i canali registrati |
 | `renderers [KEY]` | Descrive i formati documentali (`--country`, `--lang`) |
 | `locales` | Lingue disponibili per le etichette di setup |
+| `pdf PATH` | La fattura come PDF leggibile (`--logo`, `--lang`, `-o`) — extra `[pdf]` |
+| `devices [PAESE]` | Regimi di cassa per paese; `--models` per il catalogo dei dispositivi |
+| `pos` | Incassi di cassa → `ModalitaPagamento`; `--terminals` per i terminali |
 
 `FILE` può essere `-` per leggere da stdin, così la CLI si compone in pipeline.
 

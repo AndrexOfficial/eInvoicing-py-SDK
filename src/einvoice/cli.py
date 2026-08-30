@@ -457,6 +457,97 @@ def cmd_renderers(args) -> int:
     return EXIT_OK
 
 
+def cmd_pdf(args) -> int:
+    """La copia leggibile: fattura o scontrino, con logo e nella lingua giusta."""
+    from .pdf import PdfUnavailable, invoice_pdf
+
+    logo = Path(args.logo).read_bytes() if args.logo else None
+    try:
+        blob = invoice_pdf(_load_invoice(args.path), logo=logo, locale=args.lang)
+    except PdfUnavailable as exc:
+        print(f"errore: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+    if args.out:
+        Path(args.out).write_bytes(blob)
+        print(f"{args.out}: {len(blob)} byte")
+    else:
+        sys.stdout.buffer.write(blob)
+    return EXIT_OK
+
+
+def _load_invoice(path: str):
+    from .serde import invoice_from_json
+
+    return invoice_from_json(_load_text(path))
+
+
+def _load_text(path: str) -> str:
+    return sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+
+
+def cmd_devices(args) -> int:
+    """Cash-register regimes, and the hardware that satisfies them."""
+    from .reference import all_device_references, device_reference, fiscal_device_catalogue
+
+    if args.models:
+        rows = fiscal_device_catalogue(args.country)
+        for row in rows:
+            fiscal = "fiscale" if row["fiscal"] else "NON fiscale"
+            public = "pubblico" if row["public_protocol"] else "SDK del produttore"
+            print(f"{row['key']:<16} {row['vendor']}")
+            print(f"                 modelli: {', '.join(row['models'])}")
+            print(f"                 {row['protocol']}  [{public}]")
+            print(f"                 {fiscal} · mercati {', '.join(row['countries'])} "
+                  f"· {', '.join(row['connection'])}")
+            if row["capabilities"]:
+                print(f"                 sa fare: {', '.join(row['capabilities'])}")
+            if row["docs_url"]:
+                print(f"                 {row['docs_url']}")
+        print(f"\n{len(rows)} famiglie. Questo pacchetto non parla con nessuna "
+              "stampante: il driver lo scrive chi lo incorpora.")
+        return EXIT_OK
+
+    if args.country:
+        print(json.dumps(device_reference(args.country), indent=2, ensure_ascii=False))
+        return EXIT_OK
+
+    rows = all_device_references()
+    print(f"{'PAESE':<6} {'OBBLIGO':<10} {'INVIO':<10} {'POS↔RT':<7} DISPOSITIVO")
+    for row in rows:
+        pos_link = "sì" if row["pos_link_required"] else "—"
+        print(f"{row['code']:<6} {row['requirement']:<10} {row['reporting']:<10} "
+              f"{pos_link:<7} {row['device_name'] or '—'}")
+    print(f"\n{len(rows)} paesi, verificati al {rows[0]['verified_as_of']}. "
+          "Orientamento operativo, non consulenza fiscale: soglie, settori "
+          "esclusi e proroghe cambiano di continuo.")
+    return EXIT_OK
+
+
+def cmd_pos(args) -> int:
+    """Till payment → ModalitaPagamento, and the terminals that take the money."""
+    from .reference import pos_payment_reference, pos_terminal_catalogue
+
+    if getattr(args, "terminals", False):
+        rows = pos_terminal_catalogue(getattr(args, "country", None))
+        for row in rows:
+            print(f"{row['key']:<18} {row['vendor']}")
+            print(f"                   modelli: {', '.join(row['models'])}")
+            print(f"                   {row['integration']} · mercati "
+                  f"{', '.join(row['countries'])} · {', '.join(row['connection'])}")
+            if row["docs_url"]:
+                print(f"                   {row['docs_url']}")
+        print(f"\n{len(rows)} famiglie. Nessuna dichiara di essere implementata: "
+              "chi incorpora il pacchetto sa quali ha davvero cablato.")
+        return EXIT_OK
+
+    print(f"{'INCASSO':<16} {'MP':<6} {'ESATTO':<7} NOTA")
+    for row in pos_payment_reference():
+        exact = "sì" if row["exact"] else "no"
+        print(f"{row['method']:<16} {row['payment_means'] or '—':<6} {exact:<7} "
+              f"{(row['note'] or '')[:70]}")
+    return EXIT_OK
+
+
 def cmd_locales(_args) -> int:
     """Languages the setup labels come in."""
     from .reference import locale_reference
@@ -551,6 +642,26 @@ def build_parser() -> argparse.ArgumentParser:
     renderers.set_defaults(func=cmd_renderers)
 
     sub.add_parser("locales", help="lingue disponibili per le etichette di setup").set_defaults(func=cmd_locales)
+
+    pdf = sub.add_parser("pdf", help="la fattura come PDF leggibile (extra [pdf])")
+    pdf.add_argument("path", help="fattura JSON ('-' per stdin)")
+    pdf.add_argument("-o", "--out", help="file di destinazione (default: stdout)")
+    pdf.add_argument("--logo", help="immagine del logo da mettere in testa")
+    pdf.add_argument("--lang", default=None, choices=available_locales(),
+                     help="lingua del documento (default: quella del paese del cedente)")
+    pdf.set_defaults(func=cmd_pdf)
+
+    devices = sub.add_parser("devices", help="registratori di cassa e software certificato, per paese")
+    devices.add_argument("country", nargs="?", help="dettaglio di un paese in JSON (es. IT)")
+    devices.add_argument("--models", action="store_true",
+                         help="il catalogo dei dispositivi invece dei regimi")
+    devices.set_defaults(func=cmd_devices)
+
+    pos = sub.add_parser("pos", help="incassi di cassa → ModalitaPagamento; terminali")
+    pos.add_argument("--terminals", action="store_true",
+                     help="il catalogo dei terminali di pagamento")
+    pos.add_argument("--country", help="filtra il catalogo per paese (es. IT)")
+    pos.set_defaults(func=cmd_pos)
     return parser
 
 

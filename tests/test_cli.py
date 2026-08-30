@@ -349,3 +349,30 @@ def test_providers_setup_prints_the_guide_in_the_requested_language(capsys):
     out = capsys.readouterr().out
     assert "Posrednik SdI" in out          # kind label, translated
     assert "step." not in out              # no raw catalog keys leaked
+
+
+def test_devices_lists_every_profiled_country(capsys):
+    from einvoice.cli import main
+
+    assert main(["devices"]) == 0
+    out = capsys.readouterr().out
+    assert "Registratore Telematico" in out
+    assert "consulenza fiscale" in out, "il disclaimer sui dati normativi deve restare"
+
+
+def test_devices_for_one_country_is_json(capsys):
+    import json
+
+    from einvoice.cli import main
+
+    assert main(["devices", "DE"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["code"] == "DE" and payload["verified_as_of"]
+
+
+def test_pos_shows_where_the_mapping_is_a_compromise(capsys):
+    from einvoice.cli import main
+
+    assert main(["pos"]) == 0
+    out = capsys.readouterr().out
+    assert "MP01" in out and "meal_voucher" in out

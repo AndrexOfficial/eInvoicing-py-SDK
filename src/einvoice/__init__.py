@@ -51,6 +51,25 @@ from .countries import (
     supported_countries,
     validate_tax_id,
 )
+from .devices import (
+    CONNECTIONS,
+    DEVICE_CAPABILITIES,
+    FISCAL_DEVICE_MODELS,
+    FISCAL_DEVICE_REGIMES,
+    FISCAL_DEVICES_VERIFIED_AS_OF,
+    POS_TERMINALS,
+    REPORTING_KINDS,
+    REQUIREMENT_KINDS,
+    FiscalDeviceModel,
+    FiscalDeviceRegime,
+    PosTerminal,
+    countries_requiring_a_device,
+    device_regime,
+    devices_for_country,
+    fiscal_device_model,
+    pos_terminal,
+    terminals_for_country,
+)
 from .engine import EInvoiceEngine, EngineResult
 from .enums import (
     REGIMI_FISCALI,
@@ -90,10 +109,13 @@ from .formats import (
 from .i18n import (
     DEFAULT_LOCALE,
     LOCALES,
+    LOCALES_BY_COUNTRY,
     available_locales,
+    catalog_for,
     locale_for_country,
     normalize_locale,
     translate,
+    translation_keys,
 )
 from .lifecycle import Lifecycle, LifecycleEvent, Notification
 from .models import (
@@ -114,10 +136,13 @@ from .models import (
 )
 from .naming import sdi_filename, to_base36
 from .onboarding import (
+    SETUP_FLAGS,
     SetupStep,
     all_setup_guides,
     credential_fields,
+    setup_caveats,
     setup_guide,
+    setup_steps,
 )
 from .parsing import (
     compare_declared_totals,
@@ -126,6 +151,20 @@ from .parsing import (
     parse_fattura_xml,
     parse_invoice,
     parse_ubl_xml,
+)
+from .pdf import PdfBranding, PdfUnavailable, invoice_pdf, receipt_pdf
+from .pos import (
+    LOTTERY_CODE_PATTERN,
+    PAYMENT_MEANS_BY_POS,
+    DepartmentTable,
+    PaymentMeansMapping,
+    PosPaymentMethod,
+    ReceiptReference,
+    VatDepartment,
+    check_pos_alignment,
+    link_receipt,
+    payment_means_for,
+    validate_lottery_code,
 )
 from .rates import (
     ALWAYS_STANDARD_RATED,
@@ -141,12 +180,24 @@ from .rates import (
     rates_for,
     standard_rate,
 )
+from .receipt import (
+    CommercialDocument,
+    ReceiptPayment,
+    check_receipt,
+    print_receipt,
+    receipt_lines,
+)
 from .reference import (
     all_country_references,
+    all_device_references,
     all_provider_references,
     all_renderer_references,
     country_reference,
+    device_reference,
+    fiscal_device_catalogue,
     locale_reference,
+    pos_payment_reference,
+    pos_terminal_catalogue,
     product_categories,
     provider_kind_reference,
     provider_reference,
@@ -214,6 +265,23 @@ __all__ = [
     # reference views (JSON-safe, for a host's fiscal-setup UI)
     "country_reference", "all_country_references", "product_categories",
     "reference_metadata",
+    "device_reference", "all_device_references", "pos_payment_reference",
+    # punto cassa: RT, reparti IVA, documento commerciale
+    "PosPaymentMethod", "PaymentMeansMapping", "PAYMENT_MEANS_BY_POS",
+    "payment_means_for", "VatDepartment", "DepartmentTable", "ReceiptReference",
+    "link_receipt", "check_pos_alignment", "validate_lottery_code",
+    # il documento commerciale e la sua copia stampabile
+    "CommercialDocument", "ReceiptPayment", "receipt_lines", "print_receipt",
+    "check_receipt", "invoice_pdf", "receipt_pdf", "PdfBranding", "PdfUnavailable",
+    "LOTTERY_CODE_PATTERN", "REQUIREMENT_KINDS", "REPORTING_KINDS",
+    "CONNECTIONS", "DEVICE_CAPABILITIES", "LOCALES_BY_COUNTRY", "catalog_for",
+    "translation_keys", "SETUP_FLAGS", "setup_steps", "setup_caveats",
+    "FiscalDeviceRegime", "FISCAL_DEVICE_REGIMES", "FISCAL_DEVICES_VERIFIED_AS_OF",
+    "device_regime", "countries_requiring_a_device",
+    # catalogo del ferro: chi produce cosa, che protocollo parla
+    "FiscalDeviceModel", "PosTerminal", "FISCAL_DEVICE_MODELS", "POS_TERMINALS",
+    "fiscal_device_model", "pos_terminal", "devices_for_country",
+    "terminals_for_country", "fiscal_device_catalogue", "pos_terminal_catalogue",
     "provider_reference", "all_provider_references", "provider_kind_reference",
     "renderer_reference", "all_renderer_references", "locale_reference",
     # setup guides + localized labels

@@ -482,6 +482,7 @@ leggono, è supportato a metà. Dettagli in [docs/SETUP.md](docs/SETUP.md).
 - [docs/COUNTRIES.md](docs/COUNTRIES.md) — matrice paese per paese: formati, obblighi, tax-id
 - [docs/TAXES.md](docs/TAXES.md) — aliquote IVA **per categoria di prodotto** e regole fiscali (conservazione, soglie, termini)
 - [docs/PROVIDERS.md](docs/PROVIDERS.md) — le 72 piattaforme e come collegarne una nuova
+- [docs/POS.md](docs/POS.md) — punto cassa: scontrino, PDF con logo, RT, reparti IVA, terminali, regimi di cassa per paese
 - [docs/SETUP.md](docs/SETUP.md) — istruzioni di configurazione per ogni piattaforma e formato, in 31 lingue
 - [docs/PARSING.md](docs/PARSING.md) — leggere una fattura ricevuta: cosa sopravvive e cosa no
 - [docs/CORRECTIONS.md](docs/CORRECTIONS.md) — note di credito, note di debito e resi

@@ -45,6 +45,11 @@ __all__ = [
     "renderer_reference",
     "all_renderer_references",
     "locale_reference",
+    "device_reference",
+    "all_device_references",
+    "pos_payment_reference",
+    "fiscal_device_catalogue",
+    "pos_terminal_catalogue",
 ]
 
 
@@ -65,6 +70,31 @@ def _label(prefix: str, value: str | None, locale: str | None) -> str | None:
     chiave = f"{prefix}.{value}"
     tradotto = translate(chiave, locale)
     return None if tradotto == chiave else tradotto
+
+
+def _device(code: str) -> dict[str, Any]:
+    """The cash-register regime, JSON-safe.
+
+    Never absent and never raising: an unprofiled country answers
+    ``"unknown"``, which is a usable answer where a missing key is not. Kept
+    untranslated on purpose, like ``regime`` next to it — the values are a
+    vocabulary the caller branches on, and the two would drift apart if one of
+    them started arriving as prose.
+    """
+    from .devices import device_regime
+
+    regime = device_regime(code)
+    return {
+        "requirement": regime.requirement,
+        "reporting": regime.reporting,
+        "device_name": regime.device_name or None,
+        "certified_software": regime.certified_software,
+        "receipt_lottery": regime.receipt_lottery,
+        "pos_link_required": regime.pos_link_required,
+        "pos_link_since": regime.pos_link_since.isoformat() if regime.pos_link_since else None,
+        "needs_a_device": regime.needs_a_device,
+        "notes": regime.notes or None,
+    }
 
 
 def _rates(code: str, locale: str | None = None) -> list[dict[str, Any]]:
@@ -133,6 +163,11 @@ def country_reference(code: str, locale: str | None = None) -> dict[str, Any]:
             "national_format": regime.national_format,
             "notes": regime.notes or None,
         },
+        # The other half of "what does this country require of me": the
+        # e-invoicing regime says how a FATTURA travels, this says whether
+        # selling over a counter needs a certified device at all. A POS product
+        # asks both questions and used to get only one answered.
+        "fiscal_device": _device(p.code),
         "rules": {
             "retention_years": rules.retention_years,
             "simplified_invoice_threshold": _num(rules.simplified_invoice_threshold),
@@ -289,3 +324,109 @@ def locale_reference() -> dict[str, Any]:
         "default": DEFAULT_LOCALE,
         "default_by_country": {c: langs[0] for c, langs in sorted(LOCALES_BY_COUNTRY.items())},
     }
+
+
+def device_reference(code: str) -> dict[str, Any]:
+    """The cash-register regime of one country, on its own.
+
+    Permissive where :func:`country_reference` is strict, and for the same
+    reason turned around: "do I need a till?" has a useful answer even when it
+    is "we have not checked this country" — a ``KeyError`` in the middle of a
+    setup screen has none.
+    """
+    from .devices import FISCAL_DEVICES_VERIFIED_AS_OF
+
+    return {
+        "code": (code or "").upper(),
+        **_device(code),
+        "verified_as_of": FISCAL_DEVICES_VERIFIED_AS_OF.isoformat(),
+    }
+
+
+def all_device_references() -> list[dict[str, Any]]:
+    """Every country the device table names, sorted."""
+    from .devices import FISCAL_DEVICE_REGIMES
+
+    return [device_reference(code) for code in sorted(FISCAL_DEVICE_REGIMES)]
+
+
+def pos_payment_reference() -> list[dict[str, Any]]:
+    """How each till payment maps onto ``ModalitaPagamento``.
+
+    ``exact`` is the field worth rendering: the MP list was written for
+    invoicing, and for a couple of very common counter payments there is no
+    dedicated code. A UI that hides that difference hides the only part an
+    accountant would have wanted to see.
+    """
+    from .pos import PAYMENT_MEANS_BY_POS, PosPaymentMethod
+
+    return [
+        {
+            "method": method.value,
+            "payment_means": (mapping.code.value if mapping.code else None),
+            "exact": mapping.exact,
+            "note": mapping.note or None,
+        }
+        for method, mapping in ((m, PAYMENT_MEANS_BY_POS[m]) for m in PosPaymentMethod)
+    ]
+
+
+def fiscal_device_catalogue(country: str | None = None) -> list[dict[str, Any]]:
+    """Le famiglie di dispositivi fiscali, in JSON.
+
+    Con ``country`` restano solo quelle utilizzabili lì, quelle che lo nominano
+    prima: l'omologazione è nazionale, e un elenco che mescolasse i paesi
+    manderebbe qualcuno a comprare un RT italiano per un negozio di Monaco.
+
+    ``fiscal=False`` marca le termiche ESC/POS. Sono a catalogo perché in sala
+    ci sono comunque, e perché scambiarle per un RT è l'errore che costa una
+    sanzione.
+    """
+    from .devices import FISCAL_DEVICE_MODELS, devices_for_country
+
+    models = (devices_for_country(country) if country
+              else [FISCAL_DEVICE_MODELS[k] for k in sorted(FISCAL_DEVICE_MODELS)])
+    return [
+        {
+            "key": d.key,
+            "vendor": d.vendor,
+            "models": list(d.models),
+            "countries": list(d.countries),
+            "protocol": d.protocol,
+            "public_protocol": d.public_protocol,
+            "connection": list(d.connection),
+            "capabilities": list(d.capabilities),
+            "driver_hint": d.driver_hint,
+            "fiscal": d.fiscal,
+            "docs_url": d.docs_url or None,
+            "notes": d.notes or None,
+        }
+        for d in models
+    ]
+
+
+def pos_terminal_catalogue(country: str | None = None) -> list[dict[str, Any]]:
+    """Le famiglie di terminali di pagamento, in JSON.
+
+    Nessuna di queste voci dichiara di essere implementata da qualcuno: questo
+    pacchetto non parla con nessun terminale, e chi lo incorpora sa quali ha
+    davvero cablato. Qui c'è l'anagrafica — chi produce cosa, che via di
+    integrazione espone, dove sta la documentazione.
+    """
+    from .devices import POS_TERMINALS, terminals_for_country
+
+    terminals = (terminals_for_country(country) if country
+                 else [POS_TERMINALS[k] for k in sorted(POS_TERMINALS)])
+    return [
+        {
+            "key": t.key,
+            "vendor": t.vendor,
+            "models": list(t.models),
+            "countries": list(t.countries),
+            "integration": t.integration,
+            "connection": list(t.connection),
+            "docs_url": t.docs_url or None,
+            "notes": " ".join(x for x in (t.countries_note, t.notes) if x) or None,
+        }
+        for t in terminals
+    ]

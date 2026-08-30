@@ -6,9 +6,74 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [0.7.0] — 2026-08-29
 
-Il vocabolario del pacchetto smette di arrivare grezzo sugli schermi.
+Il vocabolario del pacchetto smette di arrivare grezzo sugli schermi, e il
+pacchetto smette di sapere solo metà di quello che un punto vendita deve
+sapere.
 
 ### Added
+
+- **`einvoice.pos`** — il punto in cui la cassa e la fattura si toccano. Un RT
+  ragiona per reparti IVA e indici di pagamento, la FatturaPA per aliquote,
+  `Natura` e codici `ModalitaPagamento`: nessuno dei due sa dell'altro, e
+  finora il pacchetto copriva solo il secondo. Contiene la tabella
+  **incasso di cassa → `ModalitaPagamento`** con il campo `exact` che dice
+  quando la mappatura è un compromesso (per i buoni pasto un codice dedicato
+  **non esiste**), i **reparti IVA** con i rilievi che dicono quando scontrino
+  e fattura smetteranno di quadrare, e il **riferimento al documento
+  commerciale** che una fattura emessa dopo lo scontrino deve citare.
+  Non parla con nessuna stampante: i driver restano nel prodotto, che è
+  l'unico a sapere che hardware ha in sala.
+- **`einvoice.devices`** — regimi di cassa per i trenta paesi profilati: serve
+  un dispositivo omologato (RT, TSE, RKSV, kasa fiskalna, …), come arrivano i
+  corrispettivi, se il software va certificato, se c'è la lotteria degli
+  scontrini e se il **terminale di pagamento va collegato al dispositivo**
+  (Italia dal 1° gennaio 2026, Grecia già oggi). Datato da
+  `FISCAL_DEVICES_VERIFIED_AS_OF`, e un paese non verificato dichiara
+  `"unknown"` invece di una risposta plausibile — con un test che gli impedisce
+  di portare fatti a fianco, perché un dato accanto a un'ammissione di
+  ignoranza si legge come un dato.
+- **`einvoice.receipt`** — il documento commerciale: righe, riepilogo IVA per
+  **scorporo**, pagamenti, resto, lotteria. Rende esplicito che **una cassa e
+  una fattura arrotondano in versi opposti**: sulla stessa vendita lo scontrino
+  fa 46,00 (quello che il cliente paga) e la fattura 46,01, nessuno dei due
+  sbaglia, e `check_receipt` misura quel centesimo invece di lasciarlo scoprire
+  alla chiusura. `print_receipt` guida qualunque stampante con l'interfaccia di
+  python-escpos **senza importarla** — niente dipendenze nuove, e le code page
+  restano a chi le sa gestire: reimplementare ESC/POS a byte significa mojibake
+  sugli accenti di un documento fiscale.
+- **Lo scontrino parla la lingua del paese di fatturazione.** `country` sul
+  documento, `locale` per forzarla. Sedici chiavi nuove nel catalogo (voci del
+  documento, metodi di pagamento, intestazioni) nelle stesse 31 lingue: i
+  metodi arrivavano sulla carta come `card` e `meal_voucher`, chiavi di
+  programma in mano a un cliente.
+- **`einvoice.pdf`** — `invoice_pdf()` e `receipt_pdf()`, con **logo** (percorso
+  o byte) e lingua. Restituiscono byte, non scrivono file. Un logo illeggibile
+  non ferma il documento, incluso il caso meno ovvio di un PNG con
+  l'intestazione giusta e il flusso dati rotto, che si costruisce e fallisce al
+  disegno. Lo scontrino PDF riusa le righe della termica invece di comporre un
+  secondo layout. ReportLab è l'extra `[pdf]`; `PdfUnavailable` distingue «non
+  installato» da «documento rotto», come `SigningUnavailable`. CLI:
+  `einvoice pdf`.
+- **Catalogo del ferro** in `einvoice.devices`: `FISCAL_DEVICE_MODELS` (Epson
+  FP-81II/FP-90III, Custom Q3X/KUBE II, RCH, Ditron, Olivetti, le TSE tedesche
+  Swissbit e fiskaly, più la famiglia ESC/POS generica) e `POS_TERMINALS`
+  (Stripe, SumUp, Nexi, Adyen, Worldline, PAX, Verifone, Zettle, Satispay), con
+  protocollo, collegamento, mercati e documentazione. `devices_for_country`
+  non offre un RT italiano a un negozio tedesco: l'omologazione è nazionale.
+  Viste `fiscal_device_catalogue` / `pos_terminal_catalogue`, CLI
+  `einvoice devices --models` e `einvoice pos --terminals`.
+
+  Il pacchetto **non parla con nessuna stampante e con nessun terminale**, e
+  nessuna voce dichiara di essere implementata: sarebbe una promessa che non
+  può mantenere, e chi lo incorpora la leggerebbe come propria. La famiglia
+  ESC/POS è a catalogo marcata `fiscal=False`, con un test che le impedisce di
+  dichiarare `receipt` fra le capacità — scambiarla per un RT è l'errore che
+  costa una sanzione.
+- **`country_reference()` porta `fiscal_device`**, così le schermate che già
+  mostrano le regole del paese rispondono anche a «mi serve un registratore?»
+  senza un secondo endpoint. Nuove viste `device_reference`,
+  `all_device_references`, `pos_payment_reference`; CLI `einvoice devices
+  [PAESE]` e `einvoice pos`.
 
 - **`rate_kind.*` e `mandate.*` nel catalogo i18n**, trentuno lingue come il
   resto: `standard`, `reduced`, `super_reduced`, `parking`, `zero` e
