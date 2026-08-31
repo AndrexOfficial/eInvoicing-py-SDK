@@ -638,3 +638,100 @@ def test_en16931_does_carry_the_rate_of_a_document_charge(standard):
     )
     restored = parse_invoice(_rendered(original, standard))
     assert restored.total_document() == original.total_document()
+
+
+# ── il lotto ──────────────────────────────────────────────────────────
+
+
+def _lotto() -> str:
+    """Due fatture nello stesso file, come le manda un fornitore."""
+    from datetime import date
+    from decimal import Decimal
+
+    from einvoice import Address, Invoice, LineItem, Party, build_fattura_xml
+
+    def one(number: str, amount: str) -> str:
+        doc = Invoice(
+            number=number, date=date(2026, 8, 27),
+            seller=Party(name="Fornitore", vat_number="IT12345678903", country_code="IT",
+                         tax_regime="RF01",
+                         address=Address(street="Via Roma 1", postcode="20100", city="Milano")),
+            buyer=Party(name="Cliente", vat_number="IT02786201533", country_code="IT",
+                        address=Address(street="Via Verdi 9", postcode="00100", city="Roma")),
+            lines=[LineItem("Voce", Decimal("1"), Decimal(amount), Decimal("22"))],
+        )
+        return build_fattura_xml(doc).decode()
+
+    first, second = one("1", "100.00"), one("2", "250.00")
+    start = second.index("<FatturaElettronicaBody>")
+    end = second.index("</FatturaElettronicaBody>") + len("</FatturaElettronicaBody>")
+    return first.replace("</p:FatturaElettronica>", second[start:end] + "</p:FatturaElettronica>")
+
+
+def test_a_batch_no_longer_loses_every_invoice_after_the_first():
+    """Il difetto: ``parse_invoice`` ne restituiva **una** e le altre sparivano
+    senza un errore. Su un flusso di fatture ricevute significa che non entrano
+    in contabilità e nessuno se ne accorge — il file è valido, il parsing non
+    fallisce, e mancano dei soldi.
+    """
+    from einvoice.parsing import parse_invoices
+
+    fatture = parse_invoices(_lotto())
+
+    assert [f.number for f in fatture] == ["1", "2"]
+    assert [str(f.total_document()) for f in fatture] == ["122.00", "305.00"]
+
+
+def test_the_singular_parser_refuses_a_batch_instead_of_truncating_it():
+    """Restituire la prima con un warning sarebbe ancora perdita di dati per
+    chiunque non legga i log."""
+    from einvoice.errors import ValidationError
+    from einvoice.parsing import parse_invoice
+
+    with pytest.raises(ValidationError, match="lotto"):
+        parse_invoice(_lotto())
+
+
+def test_a_single_invoice_still_parses_both_ways():
+    """La correzione non deve rendere più scomodo il caso normale."""
+    from einvoice.parsing import parse_invoice, parse_invoices
+
+    singola = _lotto()[: _lotto().index("<FatturaElettronicaBody>")] + \
+        _lotto()[_lotto().index("<FatturaElettronicaBody>"):]
+    from datetime import date
+    from decimal import Decimal
+
+    from einvoice import Address, Invoice, LineItem, Party, build_fattura_xml
+
+    doc = Invoice(
+        number="7", date=date(2026, 8, 27),
+        seller=Party(name="F", vat_number="IT12345678903", country_code="IT", tax_regime="RF01",
+                     address=Address(street="Via Roma 1", postcode="20100", city="Milano")),
+        buyer=Party(name="C", vat_number="IT02786201533", country_code="IT",
+                    address=Address(street="Via Verdi 9", postcode="00100", city="Roma")),
+        lines=[LineItem("Voce", Decimal("1"), Decimal("10.00"), Decimal("22"))],
+    )
+    xml = build_fattura_xml(doc).decode()
+    assert parse_invoice(xml).number == "7"
+    assert len(parse_invoices(xml)) == 1
+    assert singola  # il lotto resta a due corpi
+
+
+def test_parse_invoices_works_on_the_other_formats_too():
+    """UBL e CII portano una fattura per file: la lista ne contiene una, così
+    chi legge fatture in ingresso usa sempre la stessa funzione."""
+    from datetime import date
+    from decimal import Decimal
+
+    from einvoice import Address, Invoice, LineItem, Party, build_ubl_xml
+    from einvoice.parsing import parse_invoices
+
+    doc = Invoice(
+        number="9", date=date(2026, 8, 27),
+        seller=Party(name="Seller", vat_number="DE136695976", country_code="DE",
+                     address=Address(street="Str 1", postcode="10115", city="Berlin")),
+        buyer=Party(name="Buyer", vat_number="DE811907980", country_code="DE",
+                    address=Address(street="Str 2", postcode="80331", city="München")),
+        lines=[LineItem("Item", Decimal("1"), Decimal("10.00"), Decimal("19"))],
+    )
+    assert len(parse_invoices(build_ubl_xml(doc))) == 1

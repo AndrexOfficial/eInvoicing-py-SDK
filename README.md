@@ -41,7 +41,9 @@ MP01–MP23, `RegimeFiscale` validato (RF01–RF20). Blocchi: ritenuta, bollo,
 codice articolo, periodo di competenza, esigibilità I/D/S, arrotondamento,
 Art73, riferimento normativo nei riepiloghi, riferimenti (ordine/contratto/
 DDT/fatture collegate), allegati con formato/descrizione, convenzioni per
-destinatari esteri (`XXXXXXX`, CAP `00000`).
+destinatari esteri (`XXXXXXX`, CAP `00000`). In lettura: **lotti** (più fatture
+in un file) e **ricevute SdI** (RC, NS, MC, NE, DT, AT, EC) con i codici
+d'errore dello scarto.
 
 **Europa (EN 16931 / UBL Peppol BIS 3.0)** — root dedicata **CreditNote** per
 le note di credito, `BuyerReference`/`OrderReference` sempre presenti
@@ -272,6 +274,37 @@ einvoice inspect ricevuta.xml    # chi, quanto, e se torna (exit 1 se non torna)
 einvoice parse   ricevuta.xml    # → JSON, riutilizzabile con validate/render
 ```
 
+**Un file FatturaPA può contenere più fatture.** È il **lotto**: un header solo
+— stesso cedente, stesso cessionario — seguito da più `FatturaElettronicaBody`,
+ed è la forma normale delle forniture ricorrenti.
+
+```python
+from einvoice import parse_invoices
+
+for inv in parse_invoices(xml):   # sempre una lista, per tutti i formati
+    archivia(inv)
+```
+
+`parse_invoice()` resta la forma singolare e su un lotto **solleva**, dicendo
+quante fatture ha trovato, invece di restituire la prima e buttare le altre.
+
+**Le ricevute SdI si leggono.** Il ciclo non finisce con la trasmissione: SdI
+risponde con file XML, e su uno scarto il **codice d'errore** è il dato più
+utile dell'intero flusso.
+
+```python
+from einvoice.notifications import parse_sdi_receipt
+
+r = parse_sdi_receipt(xml)
+r.kind, r.type      # 'NS', NotificationType.REJECTED
+r.errors            # [SdiError(code='00404', description='Fattura duplicata')]
+lifecycle.apply(r.to_notification())
+```
+
+Un `00404` (duplicata) non va ritrasmesso, un `00311` (codice destinatario non
+valido) va corretto e rimandato: azioni opposte, e distinguerle richiede il
+codice. Riconosciute tutte e sette le sigle — RC, NS, MC, NE, DT, AT, EC.
+
 **Cosa sopravvive al viaggio.** Tutto ciò che EN 16931 modella: parti,
 indirizzi, identificativi fiscali, righe con quantità e aliquote, sconti,
 pagamenti, riferimenti, periodi. I blocchi italiani (ritenuta, cassa, bollo, e i
@@ -384,6 +417,52 @@ commercialista **senza tirare su un'applicazione**: stampa esattamente i byte
 che un transport spedirebbe. Gli exit code separano *fattura non valida* (`1`)
 da *comando sbagliato* (`2`), così in CI un rilievo non si confonde con un typo.
 
+## Uso 8 — punto cassa: scontrino, PDF, terminali
+
+Un registratore telematico e una fattura elettronica descrivono **la stessa
+vendita** in due vocabolari che non si somigliano: l'RT ragiona per reparti IVA
+e indici di pagamento, la FatturaPA per aliquote, `Natura` e
+`ModalitaPagamento`. `einvoice.pos` è il punto in cui si toccano — e il campo
+`exact` dice quando la mappatura è un compromesso invece di lasciarlo credere.
+
+```python
+from einvoice.receipt import CommercialDocument, receipt_lines, print_receipt
+from einvoice.pdf import invoice_pdf, receipt_pdf, PdfBranding
+
+righe = receipt_lines(doc, width=48, locale="de")   # 48 colonne, in tedesco
+print_receipt(doc, printer)                         # qualunque oggetto ESC/POS
+invoice_pdf(inv, branding=PdfBranding(logo="logo.png"))
+```
+
+Lo scontrino ragiona sui **prezzi lordi** e ricava l'IVA per scorporo, che è
+come lavora una cassa: sommare righe nette arrotondate darebbe 46,01 su un
+incasso di 46,00, e su uno scontrino quella riga è il resto sbagliato.
+
+Il PDF si localizza nella lingua del paese di fatturazione. I font base
+coprono Latin-1, quindi per gli altri alfabeti il pacchetto **cerca un font di
+sistema e lo sceglie per copertura**, non per disponibilità — DejaVu non copre
+CJK né thai, e prendere il primo trovato stamperebbe caselle vuote in
+giapponese. `needs_unicode_font("pl")` risponde alla domanda in
+configurazione, invece di scoprirlo quando il cliente chiede la copia.
+
+**Il catalogo del ferro** (`einvoice.devices`) elenca stampanti RT, moduli di
+sicurezza, cassetti e terminali di pagamento dicendo per ciascuno **per che via
+ci si parla** (`lan`, `bluetooth`, `usb`, `serial`, `api`, `webhook`,
+`printer_port`) e **cosa gli si può comandare** (`start_payment`, `cancel`,
+`refund`, `status`, `webhook`).
+
+```bash
+einvoice pos --integrable      # chi si può davvero pilotare, e chi no
+einvoice pos --channel lan
+```
+
+Serve a non pianificare integrazioni che non esistono: un sistema chiuso non
+espone nessun canale anche se sta nel cloud, e un cassetto portavalori non si
+integra affatto — è una serratura che scatta a 24 V sulla porta della
+stampante. Il catalogo lo **dice**, invece di ometterli e farli ricercare alla
+prossima domanda. Quale scegliere, con pro e contro:
+[docs/CHOOSING.md](docs/CHOOSING.md).
+
 ## Firma CAdES + conservazione
 
 ```python
@@ -483,6 +562,7 @@ leggono, è supportato a metà. Dettagli in [docs/SETUP.md](docs/SETUP.md).
 - [docs/TAXES.md](docs/TAXES.md) — aliquote IVA **per categoria di prodotto** e regole fiscali (conservazione, soglie, termini)
 - [docs/PROVIDERS.md](docs/PROVIDERS.md) — le 72 piattaforme e come collegarne una nuova
 - [docs/POS.md](docs/POS.md) — punto cassa: scontrino, PDF con logo, RT, reparti IVA, terminali, regimi di cassa per paese
+- [docs/CHOOSING.md](docs/CHOOSING.md) — quale terminale e quale stampante scegliere: pro e contro, uno per uno
 - [docs/SETUP.md](docs/SETUP.md) — istruzioni di configurazione per ogni piattaforma e formato, in 31 lingue
 - [docs/PARSING.md](docs/PARSING.md) — leggere una fattura ricevuta: cosa sopravvive e cosa no
 - [docs/CORRECTIONS.md](docs/CORRECTIONS.md) — note di credito, note di debito e resi
@@ -494,7 +574,7 @@ leggono, è supportato a metà. Dettagli in [docs/SETUP.md](docs/SETUP.md).
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 1618 test, ~1.7 s
+pytest -q          # 3111 test, ~3 s
 mypy               # pulito, ed è imposto in CI
 ruff check .
 ```
@@ -529,6 +609,14 @@ ruff check .
   allo stesso modo.
 - Le **aliquote IVA note** servono solo a `check()` come avviso: un'aliquota
   fuori elenco non blocca nulla, perché regimi speciali e transitori esistono.
+- **PDF e alfabeti**: 14 delle 31 lingue si stampano coi font base di
+  ReportLab; le altre chiedono un TrueType Unicode, che il pacchetto cerca fra
+  quelli di sistema (su Debian `fonts-dejavu-core`, più `fonts-noto-core` per
+  il thai e `fonts-noto-cjk` per giapponese e cinese). Se non ne trova uno che
+  copra il documento **solleva**, invece di stampare punti interrogativi al
+  posto del nome del cliente. L'**arabo** ha i glifi ma non la resa: ReportLab
+  non fa shaping né bidirezionale, quindi le lettere escono isolate e da
+  sinistra a destra — numeri giusti, testo non leggibile.
 - *Factur-X* completo = XML **dentro** un PDF/A-3. Qui si genera l'XML;
   l'incapsulamento in PDF è fuori perimetro.
 

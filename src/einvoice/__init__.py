@@ -54,20 +54,27 @@ from .countries import (
 from .devices import (
     CONNECTIONS,
     DEVICE_CAPABILITIES,
+    DEVICE_KINDS,
     FISCAL_DEVICE_MODELS,
     FISCAL_DEVICE_REGIMES,
     FISCAL_DEVICES_VERIFIED_AS_OF,
+    INTEGRATION_CHANNELS,
     POS_TERMINALS,
     REPORTING_KINDS,
     REQUIREMENT_KINDS,
+    TERMINAL_CAPABILITIES,
     FiscalDeviceModel,
     FiscalDeviceRegime,
     PosTerminal,
+    by_channel,
     countries_requiring_a_device,
     device_regime,
     devices_for_country,
+    devices_of_kind,
+    drivable_devices,
     fiscal_device_model,
     pos_terminal,
+    programmable_terminals,
     terminals_for_country,
 )
 from .engine import EInvoiceEngine, EngineResult
@@ -135,6 +142,13 @@ from .models import (
     WithholdingTax,
 )
 from .naming import sdi_filename, to_base36
+from .notifications import (
+    SDI_RECEIPT_TYPES,
+    SdiError,
+    SdiReceipt,
+    parse_sdi_receipt,
+    receipt_kind_from_filename,
+)
 from .onboarding import (
     SETUP_FLAGS,
     SetupStep,
@@ -148,11 +162,23 @@ from .parsing import (
     compare_declared_totals,
     detect_standard,
     parse_cii_xml,
+    parse_fattura_batch,
     parse_fattura_xml,
     parse_invoice,
+    parse_invoices,
     parse_ubl_xml,
 )
-from .pdf import PdfBranding, PdfUnavailable, invoice_pdf, receipt_pdf
+from .pdf import (
+    PdfBranding,
+    PdfFontUnavailable,
+    PdfUnavailable,
+    font_for_text,
+    invoice_pdf,
+    locales_without_font,
+    needs_unicode_font,
+    receipt_pdf,
+    system_unicode_font,
+)
 from .pos import (
     LOTTERY_CODE_PATTERN,
     PAYMENT_MEANS_BY_POS,
@@ -195,6 +221,7 @@ from .reference import (
     country_reference,
     device_reference,
     fiscal_device_catalogue,
+    integrable_devices,
     locale_reference,
     pos_payment_reference,
     pos_terminal_catalogue,
@@ -241,7 +268,7 @@ from .transport import (
     transport_for_provider,
 )
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 __all__ = [
     # domain
@@ -273,6 +300,7 @@ __all__ = [
     # il documento commerciale e la sua copia stampabile
     "CommercialDocument", "ReceiptPayment", "receipt_lines", "print_receipt",
     "check_receipt", "invoice_pdf", "receipt_pdf", "PdfBranding", "PdfUnavailable",
+    "PdfFontUnavailable", "needs_unicode_font", "locales_without_font", "system_unicode_font", "font_for_text",
     "LOTTERY_CODE_PATTERN", "REQUIREMENT_KINDS", "REPORTING_KINDS",
     "CONNECTIONS", "DEVICE_CAPABILITIES", "LOCALES_BY_COUNTRY", "catalog_for",
     "translation_keys", "SETUP_FLAGS", "setup_steps", "setup_caveats",
@@ -282,6 +310,9 @@ __all__ = [
     "FiscalDeviceModel", "PosTerminal", "FISCAL_DEVICE_MODELS", "POS_TERMINALS",
     "fiscal_device_model", "pos_terminal", "devices_for_country",
     "terminals_for_country", "fiscal_device_catalogue", "pos_terminal_catalogue",
+    "TERMINAL_CAPABILITIES", "INTEGRATION_CHANNELS", "DEVICE_KINDS",
+    "programmable_terminals", "drivable_devices", "by_channel", "devices_of_kind",
+    "integrable_devices",
     "provider_reference", "all_provider_references", "provider_kind_reference",
     "renderer_reference", "all_renderer_references", "locale_reference",
     # setup guides + localized labels
@@ -310,7 +341,10 @@ __all__ = [
     # engine
     "EInvoiceEngine", "EngineResult",
     # parsing (inbound)
-    "parse_invoice", "detect_standard", "parse_ubl_xml", "parse_cii_xml",
+    "parse_invoice", "parse_invoices", "parse_fattura_batch",
+    # ricevute SdI: leggere la risposta, non solo mandare la domanda
+    "SdiReceipt", "SdiError", "SDI_RECEIPT_TYPES", "parse_sdi_receipt",
+    "receipt_kind_from_filename", "detect_standard", "parse_ubl_xml", "parse_cii_xml",
     "parse_fattura_xml", "compare_declared_totals",
     # naming + serde + errors
     "sdi_filename", "to_base36",

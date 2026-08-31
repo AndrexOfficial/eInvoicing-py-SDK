@@ -35,6 +35,7 @@ from .countries import (
     renderer_for_country,
     validate_tax_id,
 )
+from .devices import INTEGRATION_CHANNELS
 from .errors import EInvoiceError
 from .formats import available_renderers, get_renderer
 from .i18n import available_locales
@@ -527,6 +528,49 @@ def cmd_pos(args) -> int:
     """Till payment → ModalitaPagamento, and the terminals that take the money."""
     from .reference import pos_payment_reference, pos_terminal_catalogue
 
+    if getattr(args, "channel", None):
+        from .devices import by_channel
+
+        gruppi = by_channel(args.channel, getattr(args, "country", None))
+        print(f"{args.channel.upper()} — {INTEGRATION_CHANNELS[args.channel]}\n")
+        for term in gruppi["terminals"]:
+            print(f"  terminale  {term.key:20} {term.vendor}")
+        for dev in gruppi["devices"]:
+            print(f"  device     {dev.key:20} {dev.vendor[:44]}")
+        if not gruppi["terminals"] and not gruppi["devices"]:
+            print("  niente su questa via.")
+        return EXIT_OK
+
+    if getattr(args, "integrable", False):
+        from .reference import integrable_devices
+
+        vista = integrable_devices(getattr(args, "country", None))
+        print("TERMINALI COMANDABILI DA SOFTWARE")
+        for row in vista["terminals"]:
+            push = "esito in push" if row["result_is_pushed"] else "esito da interrogare"
+            docs = "doc pubblica" if row["public_docs"] else "doc a contratto"
+            print(f"  {row['key']:18} {row['integration']:12} {push:22} {docs}")
+            print(f"  {'':18} {', '.join(row['capabilities'])}")
+        print("\nDISPOSITIVI FISCALI PILOTABILI")
+        for row in vista["fiscal_devices"]:
+            proto = "pubblico" if row["public_protocol"] else "SDK del produttore"
+            print(f"  {row['key']:18} {row['protocol'][:46]:48} [{proto}]")
+        if vista["not_addressable"]:
+            print("\nSENZA INDIRIZZO (si comandano dalla stampante)")
+            for row in vista["not_addressable"]:
+                print(f"  {row['key']:18} {row['vendor'][:52]}")
+        print("\nPER CHE VIA")
+        for channel, gruppi in vista["by_channel"].items():
+            quanti = len(gruppi["terminals"]) + len(gruppi["devices"])
+            if quanti:
+                print(f"  {channel:14} {quanti:>2}  "
+                      f"{', '.join(gruppi['terminals'] + gruppi['devices'])[:70]}")
+        if vista["excluded"]:
+            print("\nFUORI, E PERCHÉ")
+            for row in vista["excluded"]:
+                print(f"  {row['key']:18} {row['reason']}")
+        return EXIT_OK
+
     if getattr(args, "terminals", False):
         rows = pos_terminal_catalogue(getattr(args, "country", None))
         for row in rows:
@@ -661,6 +705,10 @@ def build_parser() -> argparse.ArgumentParser:
     pos.add_argument("--terminals", action="store_true",
                      help="il catalogo dei terminali di pagamento")
     pos.add_argument("--country", help="filtra il catalogo per paese (es. IT)")
+    pos.add_argument("--channel", choices=sorted(INTEGRATION_CHANNELS),
+                     help="solo ciò che si raggiunge per quella via")
+    pos.add_argument("--integrable", action="store_true",
+                     help="solo ciò che si può comandare da software, e chi resta fuori")
     pos.set_defaults(func=cmd_pos)
     return parser
 

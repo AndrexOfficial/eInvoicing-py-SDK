@@ -219,6 +219,60 @@ einvoice pdf fattura.json -o fattura.pdf --logo logo.png --lang de
   cattura risponde «PDF non disponibile» e continua a emettere l'XML, che è la
   parte fiscale.
 
+### Gli alfabeti
+
+I font base di ReportLab coprono **Latin-1** e basta. Il pacchetto scrive le
+etichette in trentuno lingue, quindi per diciassette di esse serve un TrueType
+Unicode — e non solo per i casi ovvi: oltre a greco, cirillico, arabo, CJK e
+thai ci finisce tutto il **latino esteso**, cioè polacco, ceco, ungherese,
+rumeno, croato, slovacco, sloveno, baltico, maltese ed estone.
+
+Nella maggior parte dei casi non devi fare niente: quando il documento esce da
+Latin-1 il pacchetto **cerca un font di sistema** e usa il primo che copre
+davvero quei caratteri.
+
+```python
+from einvoice.pdf import needs_unicode_font, locales_without_font, PdfBranding
+
+needs_unicode_font("it")   # False — 14 lingue stampano coi font base
+needs_unicode_font("pl")   # True  — la ł non è in Latin-1
+locales_without_font()     # da de en es et fi fil fr ga id it nl pt sv
+
+# Una scelta esplicita ha sempre la precedenza sui font di sistema.
+invoice_pdf(inv, branding=PdfBranding(font_path="DejaVuSans.ttf"))
+```
+
+**Si sceglie per copertura, non per disponibilità.** DejaVu — il font che quasi
+ogni immagine Linux ha — copre latino, greco, cirillico e arabo ma **non** CJK e
+**non** thai. Prendere il primo font trovato avrebbe stampato caselle vuote in
+giapponese: lo stesso difetto di prima con un passaggio in più. Quindi ogni
+candidato viene provato contro i caratteri del documento e scartato se non
+bastano.
+
+Su Debian: `fonts-dejavu-core` per latino esteso, greco, cirillico e arabo,
+`fonts-noto-core` per il thai, `fonts-noto-cjk` per giapponese e cinese —
+quest'ultimo pesa circa duecento megabyte, quindi è una scelta di immagine e non
+un default.
+
+Se **nessun** font disponibile copre il documento si solleva
+`PdfFontUnavailable`, che nomina i caratteri mancanti, i font provati e i
+pacchetti da installare. È un errore e non un ripiego perché il ripiego c'era e
+faceva danni: ReportLab sostituiva ogni carattere fuori Latin-1 con un punto
+interrogativo, quindi una copia di cortesia greca usciva col nome del cliente
+scritto `???` e **nessuno se ne accorgeva**, perché non falliva niente.
+
+Il controllo copre anche i **dati del chiamante** — ragione sociale, indirizzi,
+descrizioni delle righe — non solo le etichette: un cliente con un nome
+cirillico su una fattura in italiano è lo stesso problema. E si fa **prima** di
+aprire la pagina, perché un errore a metà lascerebbe un PDF troncato.
+
+**Un limite dichiarato:** l'arabo ha i glifi ma non la resa. ReportLab non fa
+shaping né bidirezionale, quindi le lettere escono isolate e da sinistra a
+destra. Il PDF non è sbagliato nei numeri, ma per un lettore arabo non è
+leggibile: per quel mercato conviene emettere in un'altra lingua finché non
+c'è un motore di shaping.
+
+
 ## Il ferro, per nome
 
 La domanda dopo «mi serve un registratore?» è «quale posso comprare». Senza una
@@ -278,7 +332,14 @@ termica qualunque, ed è per questo che compaiono senza capacità di stampa.
 resto: `cloud_api` (il server chiede, il terminale esegue), `terminal_api`
 (protocollo diretto sul terminale, spesso in LAN, sopravvive a una linea che
 cade), `device_sdk` (la app gira **sul** terminale Android), `softpos` (il
-telefono è il terminale), `wallet` (QR, nessun ferro).
+telefono è il terminale), `wallet` (QR, nessun ferro), `vendor_pos` (**sistema
+chiuso**: il terminale si comanda solo dal POS del fornitore).
+
+`vendor_pos` non è una lacuna del catalogo, è il prodotto. Alcuni fornitori
+vendono deliberatamente terminale e cassa come un blocco solo — è la ragione per
+cui costano poco e si installano in un pomeriggio — e non pubblicano niente
+contro cui costruire. Dirlo qui evita che qualcuno pianifichi un'integrazione
+che non esiste, che è l'unico modo in cui un catalogo può fare danno.
 
 | Chiave | Fornitore | Modelli | Integrazione | Mercati |
 |---|---|---|---|---|
@@ -291,11 +352,132 @@ telefono è il terminale), `wallet` (QR, nessun ferro).
 | `verifone` | Verifone | V240m, P400, T650 | `device_sdk` | EU, global |
 | `zettle` | Zettle (PayPal) | Reader 2, Terminal | `device_sdk` | EU, GB |
 | `satispay` | Satispay | QR / app | `wallet` | IT, EU |
+| `flatpay` | Flatpay | Card Terminal, POS | `vendor_pos` | EU |
+
+**Flatpay** merita una riga in più, perché la domanda «possiamo integrarlo?»
+torna. Al 31 agosto 2026 non risultano pubblicati né una API del terminale, né
+un SDK, né un portale sviluppatori: la «POS integration» che pubblicizzano è la
+*loro* cassa col *loro* terminale. Quello che espone davvero è un'API per
+l'**e-commerce** (chiave API più plugin Shopify/Magento/WooCommerce/Prestashop)
+e degli export **contabili** (Dinero, e-conomic) — utili, ma nessuno dei due
+avvia un pagamento in presenza da una cassa esterna. Per farlo servirebbe un
+accordo diretto col fornitore.
 
 PAX è il ferro sotto molti SmartPOS di marca: l'acquirer cambia, l'hardware no.
 Satispay non è un terminale ma un portafoglio — nessun ferro da comprare e
 nessun collegamento all'RT da cablare, il che non lo esonera dal tracciamento
 dell'incasso.
+
+> **Quale comprare?** Questo file dice cosa esiste e cosa parla con cosa.
+> Pro, contro e abbinamenti consigliati stanno in [CHOOSING.md](CHOOSING.md),
+> tenuto separato di proposito: qui ci sono fatti verificabili, lì c'è
+> giudizio — e le due cose invecchiano in modo diverso.
+
+### Chi si può davvero comandare
+
+«Integrabile» ha un significato preciso: **un sistema esterno avvia un incasso
+in presenza e ne conosce l'esito**. Tutto il resto — leggere i report, esportare
+in contabilità — è utile e non è integrazione.
+
+```bash
+einvoice pos --integrable --country IT
+```
+
+```python
+from einvoice.reference import integrable_devices
+from einvoice.devices import programmable_terminals
+
+integrable_devices("IT")                  # terminali + dispositivi + chi resta fuori
+[t.key for t in programmable_terminals()] # solo chi accetta start_payment
+```
+
+`capabilities` è il campo da leggere, e `start_payment` la voce che decide.
+`result_is_pushed` dice se l'esito arriva da solo o va interrogato — e qualcuno
+deve ricordarsi di farlo, anche quando la cassa è stata chiusa nel frattempo.
+
+| | Via | Esito | Doc |
+|---|---|---|---|
+| Stripe Terminal | `cloud_api` | webhook | pubblica |
+| SumUp (Solo) | `cloud_api` | webhook | pubblica |
+| Adyen | `terminal_api` | webhook | pubblica |
+| Satispay | `wallet` | webhook | pubblica |
+| Nexi | `device_sdk` + Payment Bridge | polling | pubblica |
+| Worldline | `terminal_api` | polling | pubblica |
+| Verifone · Zettle | `device_sdk` | polling | pubblica |
+| PAX | `device_sdk` | polling | a contratto |
+| **Flatpay** | `vendor_pos` | — | — |
+
+Verificati sulle documentazioni dei fornitori, non a memoria. Due cose che
+valgono più della tabella:
+
+- **SumUp**: la Cloud API avvia il pagamento sul lettore **Solo** da qualunque
+  piattaforma capace di fare HTTPS, senza vincolo di distanza fra cassa e
+  lettore, e l'esito torna via webhook. Air resta legato a un telefono che fa da
+  ponte: per una cassa server-driven il lettore è Solo.
+- **Satispay**: il callback dice soltanto che lo stato è **cambiato**, non qual
+  è. Per saperlo si rilegge il pagamento. Chi tratta la notifica come conferma
+  di incasso registra un pagamento che potrebbe essere stato annullato.
+
+Un test vieta a un terminale di dichiarare `status` o `webhook` senza
+`start_payment`: descriverebbe un sistema di cui si legge l'esito di transazioni
+che non si possono avviare, che è reportistica e va detta con altre parole.
+
+### Per che via ci si parla
+
+`connection` dice come il ferro è **attaccato**; `channels` dice come ci si
+**parla**, ed è la domanda di chi deve decidere l'architettura prima di
+comprare.
+
+```bash
+einvoice pos --channel lan --country IT
+einvoice pos --channel bluetooth
+einvoice pos --channel webhook
+```
+
+| Via | Cosa significa | Chi c'è |
+|---|---|---|
+| `lan` | Indirizzo IP in sala: si apre un socket | Stripe WisePOS E, Adyen, Worldline, Nexi, tutte le RT, ESC/POS |
+| `bluetooth` | Accoppiato al dispositivo in mano all'operatore | SumUp, Zettle, termiche portatili |
+| `api` | Chiamata HTTP al cloud del fornitore | Stripe, SumUp, Adyen, Nexi, Satispay, Worldline… |
+| `webhook` | L'esito torna in push | Stripe, SumUp, Adyen, Satispay |
+| `usb` / `serial` | Cavo locale, tipicamente dietro un bridge in sala | RT Epson/Custom/RCH/Ditron/Olivetti |
+| `printer_port` | **Nessun indirizzo**: risponde solo alla stampante | cassetti |
+
+`lan` e `api` non sono la stessa cosa anche quando finiscono entrambe su un cavo
+di rete: la prima muore se salta lo switch, la seconda se salta la linea. Sono
+due infrastrutture diverse, e sceglierle è una decisione che si prende una volta.
+
+**Un sistema chiuso non espone nessun canale**, anche se sta nel cloud:
+`channels` di Flatpay è vuoto. «Raggiungibile via cloud» e «integrabile via API»
+non sono la stessa affermazione, e un elenco filtrato per `api` che lo
+includesse manderebbe qualcuno a cercare un'API che non c'è.
+
+### I cassetti: non si integrano
+
+Un cassetto a impulso è **una serratura che scatta quando arrivano 24 V** sulla
+porta DK della stampante. Non ha indirizzo, non ha protocollo, non risponde — e
+lo stato «aperto» non torna indietro da nessuna parte.
+
+```python
+from einvoice.devices import devices_of_kind, FISCAL_DEVICE_MODELS
+
+devices_of_kind("cash_drawer")                      # la famiglia
+FISCAL_DEVICE_MODELS["cash_drawer_kick"].addressable  # False
+```
+
+Cercarne il driver è il vicolo cieco più comune al banco. **Non si integra il
+cassetto: si integra la stampante che lo apre**, ed è per questo che `drawer` è
+una *capacità delle stampanti* (Epson RT, Custom RT, ESC/POS) e non del
+cassetto. Il pin standard è il 2, alcuni modelli cablano il 5: spararli entrambi
+è innocuo.
+
+Non è un dispositivo fiscale. È una scatola, e `integrable_devices()` lo tiene
+in un elenco a parte (`not_addressable`) proprio per non farlo cercare fra i
+pilotabili.
+
+`DEVICE_KINDS` distingue le quattro cose che stanno al banco e che il catalogo
+teneva mescolate: `fiscal_printer`, `receipt_printer`, `security_module` (una
+TSE firma e non stampa) e `cash_drawer`.
 
 ### Il collegamento POS ↔ registratore
 

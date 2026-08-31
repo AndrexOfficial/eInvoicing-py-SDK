@@ -4,6 +4,129 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-08-31
+
+Il pacchetto smette di credere a quello che ha appena scritto. Le tre
+correzioni di questa versione hanno la stessa forma: non falliva niente, il file
+restava valido, e quello che cambiava erano i soldi o la leggibilità. Si trovano
+solo facendo il giro completo — scrivi, rileggi, confronta — perché guardando
+solo chi scrive sembra tutto a posto.
+
+Insieme, il catalogo del ferro impara a dire **per che via** ci si parla con un
+dispositivo e **che cosa** gli si può davvero comandare, e a nominare chi resta
+fuori invece di ometterlo.
+
+### Added
+
+- **`einvoice.notifications`** — il lettore delle ricevute SdI. Il pacchetto
+  sapeva costruire la fattura, firmarla, trasmetterla e modellarne il ciclo di
+  vita, e non sapeva leggere l'unica cosa che torna indietro: ogni integrazione
+  se le riparsava per conto suo, che è la duplicazione che questo pacchetto
+  esiste per togliere. `parse_sdi_receipt()` riconosce tutte e sette le sigle
+  (RC, NS, MC, NE, DT, AT, EC) e ne estrae identificativo SdI, nome file, data,
+  esito e — su uno scarto — i **codici d'errore**, che sono il dato che fa
+  ripartire il lavoro: un `00404` (duplicata) non va ritrasmesso, un `00311`
+  (codice destinatario non valido) va corretto e rimandato, e sono due azioni
+  opposte. `.to_notification()` la consegna al ciclo di vita esistente. Il
+  namespace non si pretende, perché gli intermediari lo riscrivono e un parser
+  che lo esigesse fallirebbe su file perfettamente validi.
+- **`parse_invoices()`** e `parse_fattura_batch()` — un file FatturaPA può
+  contenere più fatture (il **lotto**: un header solo, più
+  `FatturaElettronicaBody`), ed è la forma normale delle forniture ricorrenti.
+  `parse_invoices()` restituisce sempre una lista, per tutti i formati: è la
+  funzione da usare quando il file arriva da fuori e non sai cosa contiene.
+  Vedi *Fixed*.
+- **`docs/CHOOSING.md`** — pro e contro di ogni terminale e di ogni stampante,
+  più gli abbinamenti per situazione. Tenuto **fuori dal catalogo** di
+  proposito: un campo `recommended` dentro una struttura dati è un'opinione
+  travestita da fatto, e nessuno la aggiorna. Un documento datato dice almeno
+  quando è stato scritto. Nessun prezzo: cambiano più in fretta del file, e una
+  cifra vecchia è peggio di nessuna cifra.
+- **`channels` — per che via ci si parla**, derivata e non dichiarata, quindi
+  non può contraddire `connection`: `lan`, `bluetooth`, `usb`, `serial`, `api`,
+  `webhook`, `printer_port`. `by_channel()` e `einvoice pos --channel` per
+  filtrare. Un **sistema chiuso non espone nessun canale** anche se sta nel
+  cloud: «raggiungibile via cloud» e «integrabile via API» non sono la stessa
+  affermazione.
+- **`capabilities` sui terminali** — cosa un sistema esterno può davvero fare:
+  `start_payment`, `cancel`, `refund`, `status`, `webhook`. Verificate sulle
+  documentazioni dei fornitori: la Cloud API di SumUp sul lettore Solo, le
+  Payment Bridge API di Nexi, la Terminal API di Adyen, il callback S2S di
+  Satispay (che segnala il **cambio** di stato, non lo stato: chi lo tratta da
+  conferma registra un incasso che potrebbe essere annullato). `programmable`,
+  `result_is_pushed`, `public_docs`, più `programmable_terminals()`,
+  `drivable_devices()` e la vista `integrable_devices()` che tiene insieme i due
+  mondi e **nomina chi resta fuori**. CLI `einvoice pos --integrable`.
+- **I cassetti portavalori a catalogo**, con la cosa che li riguarda davvero:
+  **non si integrano**. Un cassetto a impulso è una serratura che scatta quando
+  arrivano 24 V sulla porta DK della stampante — nessun indirizzo, nessun
+  protocollo, nessuna risposta. Non si integra il cassetto, si integra la
+  stampante che lo apre, ed è per questo che `drawer` resta una capacità delle
+  stampanti. `addressable` lo dichiara, `integrable_devices()` lo tiene in un
+  elenco a parte per non farlo cercare fra i pilotabili, e `DEVICE_KINDS`
+  separa finalmente le quattro cose che il catalogo teneva mescolate
+  (`fiscal_printer`, `receipt_printer`, `security_module`, `cash_drawer`).
+- **Flatpay a catalogo**, con una categoria nuova: `vendor_pos` — **sistema
+  chiuso**, il terminale si comanda solo dal POS del fornitore. Non è una
+  lacuna del catalogo, è il prodotto: alcuni vendono deliberatamente terminale
+  e cassa come un blocco solo. Ometterlo lo farebbe ricercare alla prossima
+  domanda; metterlo senza dirlo farebbe pianificare un'integrazione che non
+  esiste. Un test vieta a un `vendor_pos` di dichiarare `lan` fra le
+  connessioni: sono affermazioni opposte.
+- **`needs_unicode_font()`**, `locales_without_font()` e
+  `system_unicode_font()` — la domanda «per stampare in questa lingua mi serve
+  un font, e ce n'è uno?» si può fare in configurazione invece di scoprirla
+  quando il cliente chiede la copia.
+
+### Fixed
+
+- **Un lotto FatturaPA perdeva ogni fattura dopo la prima, in silenzio.**
+  `parse_invoice()` leggeva il primo `FatturaElettronicaBody` e ignorava gli
+  altri: su un flusso di fatture ricevute significa che non entrano in
+  contabilità e nessuno se ne accorge — il file è valido, il parsing non
+  fallisce, e mancano dei soldi. Ora `parse_invoices()` le legge tutte, e la
+  versione singolare **solleva** nominando il numero di fatture trovate invece
+  di troncare. Restituire la prima con un avviso sarebbe stata ancora perdita
+  di dati per chiunque non legga i log.
+- **Rileggere una fattura le spostava imponibile fra aliquote.** Lo
+  `ScontoMaggiorazione` di documento, nello schema FatturaPA, non ha
+  `AliquotaIVA`: il formato non trasporta a quale aliquota lo sconto è stato
+  applicato. Rileggendo il file lo sconto restava senza aliquota e alla
+  riemissione cadeva nel bucket della prima riga — cinque euro nati sull'esente
+  rinascevano sul 22%, con 1,10 € di IVA inventati e il totale del documento
+  cambiato. L'informazione però nel file c'è, nei `DatiRiepilogo`: la
+  differenza fra l'imponibile dichiarato per aliquota e la somma delle righe
+  *è* lo sconto, e ora si legge da lì. L'attribuzione avviene solo su
+  corrispondenza esatta o quando un solo bucket si è mosso; nel dubbio resta
+  `None`, perché un'attribuzione inventata sarebbe lo stesso spostamento di
+  imponibile con l'aggravante di sembrare intenzionale.
+- **Il PDF stampava punti interrogativi al posto degli alfabeti non latini.**
+  Le etichette esistono in trentuno lingue e i font base di ReportLab coprono
+  Latin-1: una copia di cortesia greca, russa o polacca usciva col nome del
+  cliente sostituito da `???`, e non falliva niente. Ora il pacchetto **cerca
+  da sé un font di sistema** quando il documento esce da Latin-1, e lo sceglie
+  **per copertura, non per disponibilità**: DejaVu, che quasi ogni immagine
+  Linux ha, non copre CJK né thai, e prendere il primo font trovato avrebbe
+  stampato caselle vuote in giapponese — lo stesso difetto con un passaggio in
+  più. `PdfBranding(font_path=…)` ha la precedenza; se nessun font disponibile
+  basta si solleva `PdfFontUnavailable`, che nomina i caratteri mancanti, i
+  font provati e i pacchetti da installare — **prima** di aprire la pagina,
+  perché un errore a metà lascerebbe un PDF troncato. Il controllo copre anche
+  i dati del chiamante, non solo le etichette: un nome cirillico su una fattura
+  italiana è lo stesso problema. Quattordici lingue su trentuno stampano coi
+  font base, e italiano e inglese sono fra quelle.
+
+### Known limitations
+
+- **L'arabo ha i glifi ma non la resa.** ReportLab non fa shaping né
+  bidirezionale: le lettere escono isolate e da sinistra a destra. Il PDF non
+  sbaglia i numeri, ma per un lettore arabo non è leggibile. Dichiarato invece
+  che nascosto: per quel mercato conviene emettere in un'altra lingua finché
+  non c'è un motore di shaping.
+- **Giapponese e cinese nel PDF** richiedono `fonts-noto-cjk`, che pesa circa
+  duecento megabyte: è una scelta di immagine, non un default. Senza, il
+  documento solleva dicendo quale pacchetto installare.
+
 ## [0.7.0] — 2026-08-29
 
 Il vocabolario del pacchetto smette di arrivare grezzo sugli schermi, e il

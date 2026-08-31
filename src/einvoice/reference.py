@@ -50,6 +50,7 @@ __all__ = [
     "pos_payment_reference",
     "fiscal_device_catalogue",
     "pos_terminal_catalogue",
+    "integrable_devices",
 ]
 
 
@@ -395,6 +396,9 @@ def fiscal_device_catalogue(country: str | None = None) -> list[dict[str, Any]]:
             "protocol": d.protocol,
             "public_protocol": d.public_protocol,
             "connection": list(d.connection),
+            "channels": list(d.channels),
+            "addressable": d.addressable,
+            "kind": d.kind,
             "capabilities": list(d.capabilities),
             "driver_hint": d.driver_hint,
             "fiscal": d.fiscal,
@@ -405,7 +409,8 @@ def fiscal_device_catalogue(country: str | None = None) -> list[dict[str, Any]]:
     ]
 
 
-def pos_terminal_catalogue(country: str | None = None) -> list[dict[str, Any]]:
+def pos_terminal_catalogue(country: str | None = None, *,
+                           programmable_only: bool = False) -> list[dict[str, Any]]:
     """Le famiglie di terminali di pagamento, in JSON.
 
     Nessuna di queste voci dichiara di essere implementata da qualcuno: questo
@@ -413,10 +418,14 @@ def pos_terminal_catalogue(country: str | None = None) -> list[dict[str, Any]]:
     davvero cablato. Qui c'è l'anagrafica — chi produce cosa, che via di
     integrazione espone, dove sta la documentazione.
     """
-    from .devices import POS_TERMINALS, terminals_for_country
+    from .devices import POS_TERMINALS, programmable_terminals, terminals_for_country
 
-    terminals = (terminals_for_country(country) if country
-                 else [POS_TERMINALS[k] for k in sorted(POS_TERMINALS)])
+    if programmable_only:
+        terminals = programmable_terminals(country)
+    elif country:
+        terminals = terminals_for_country(country)
+    else:
+        terminals = [POS_TERMINALS[k] for k in sorted(POS_TERMINALS)]
     return [
         {
             "key": t.key,
@@ -425,8 +434,70 @@ def pos_terminal_catalogue(country: str | None = None) -> list[dict[str, Any]]:
             "countries": list(t.countries),
             "integration": t.integration,
             "connection": list(t.connection),
+            "channels": list(t.channels),
+            "capabilities": list(t.capabilities),
+            "programmable": t.programmable,
+            "result_is_pushed": t.result_is_pushed,
+            "public_docs": t.public_docs,
             "docs_url": t.docs_url or None,
             "notes": " ".join(x for x in (t.countries_note, t.notes) if x) or None,
         }
         for t in terminals
     ]
+
+
+def integrable_devices(country: str | None = None) -> dict[str, Any]:
+    """Tutto ciò che si può comandare da software, in un colpo solo.
+
+    È la vista che serve a una guida: *cosa posso far partire dal mio codice, e
+    come mi torna indietro il risultato.* Tiene insieme i due mondi perché a un
+    integratore la domanda viene una volta sola, e la risposta è diversa per i
+    due — un terminale si comanda via rete, una stampante fiscale via protocollo
+    locale.
+
+    ``capabilities`` è il campo da leggere, e ``start_payment`` la voce che
+    decide: senza, il terminale sta sul banco accanto alla cassa e basta.
+    """
+    from .devices import (
+        DEVICE_KINDS,
+        INTEGRATION_CHANNELS,
+        TERMINAL_CAPABILITIES,
+        by_channel,
+    )
+
+    return {
+        "terminals": pos_terminal_catalogue(country, programmable_only=True),
+        "fiscal_devices": [
+            row for row in fiscal_device_catalogue(country)
+            if row["capabilities"] and row["addressable"]
+        ],
+        # I cassetti stanno a parte perché la risposta che li riguarda è
+        # diversa da tutte le altre: non si integrano. Metterli nell'elenco
+        # sopra li farebbe cercare fra i dispositivi pilotabili.
+        "not_addressable": [
+            row for row in fiscal_device_catalogue(country)
+            if not row["addressable"]
+        ],
+        "vocabulary": {
+            "terminal_capabilities": dict(TERMINAL_CAPABILITIES),
+            "integration_channels": dict(INTEGRATION_CHANNELS),
+            "device_kinds": dict(DEVICE_KINDS),
+        },
+        # Raggruppato per via, che è la domanda di chi deve decidere
+        # l'architettura prima di comprare: cosa arriva dalla rete della sala e
+        # cosa passa dal cloud del fornitore. Le due muoiono in modi diversi —
+        # la prima se salta lo switch, la seconda se salta la linea.
+        "by_channel": {
+            channel: {
+                "terminals": [t.key for t in by_channel(channel, country)["terminals"]],
+                "devices": [d.key for d in by_channel(channel, country)["devices"]],
+            }
+            for channel in INTEGRATION_CHANNELS
+        },
+        "excluded": [
+            {"key": row["key"], "vendor": row["vendor"], "reason": row["integration"],
+             "notes": row["notes"]}
+            for row in pos_terminal_catalogue(country)
+            if not row["programmable"]
+        ],
+    }

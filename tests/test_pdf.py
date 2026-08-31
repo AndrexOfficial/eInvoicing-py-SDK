@@ -169,7 +169,9 @@ def test_the_receipt_pdf_says_the_same_words_as_the_text_layout():
 
 def test_an_explicit_locale_reaches_the_pdf():
     assert receipt_pdf(_receipt(country="IT"), locale="fr").startswith(b"%PDF-")
-    assert invoice_pdf(_invoice(), locale="el").startswith(b"%PDF-")
+    # Il greco lo copre `test_a_script_the_font_cannot_draw_raises…`: senza font
+    # non esce, ed è la correzione — prima usciva pieno di punti interrogativi.
+    assert invoice_pdf(_invoice(), locale="pt").startswith(b"%PDF-")
 
 
 def test_the_invoice_language_follows_the_seller_country():
@@ -245,3 +247,246 @@ def test_the_error_is_catchable_as_an_einvoice_error():
 
     assert issubclass(PdfUnavailable, EInvoiceError)
     assert issubclass(PdfUnavailable, RuntimeError)
+
+
+# ── gli alfabeti ──────────────────────────────────────────────────────
+#
+# Il pacchetto scrive le etichette in trentuno lingue e i font base di ReportLab
+# coprono Latin-1. Localizzare il PDF senza accorgersene produceva un documento
+# in cui il nome del cliente greco era una fila di punti interrogativi — e non
+# falliva niente, quindi non se ne accorgeva nessuno.
+
+
+def _greca() -> Invoice:
+    return _invoice(
+        seller=Party(name="Εταιρεία ΑΕ", vat_number="EL123456783", country_code="GR",
+                     address=Address(street="Οδός 1", postcode="10431", city="Αθήνα")),
+        buyer=Party(name="Πελάτης", vat_number="EL094014201", country_code="GR"),
+        lines=[LineItem("Υπηρεσία", Decimal("1"), Decimal("100.00"), Decimal("24"))],
+        causale=None,
+    )
+
+
+def test_a_script_the_font_cannot_draw_raises_instead_of_printing_question_marks(senza_font_di_sistema):
+    """Una copia di cortesia col nome del cliente sostituito da `???` è peggio
+    di una copia che non esce: quella almeno si nota."""
+    from einvoice.pdf import PdfFontUnavailable
+
+    with pytest.raises(PdfFontUnavailable, match="font_path"):
+        invoice_pdf(_greca())
+
+
+def test_the_error_names_the_characters_and_the_fix(senza_font_di_sistema):
+    from einvoice.pdf import PdfFontUnavailable
+
+    with pytest.raises(PdfFontUnavailable) as exc:
+        invoice_pdf(_greca())
+
+    assert "Σ" in str(exc.value) or "Ο" in str(exc.value)
+    assert "DejaVuSans" in str(exc.value)
+
+
+def test_latin_accents_and_the_euro_sign_still_work():
+    """à è ì ò ù e € sono dentro Latin-1: la correzione non deve rendere più
+    difficile il caso normale italiano."""
+    accentata = _invoice(
+        seller=Party(name="Trattoria àèìòù", vat_number="IT12345678903", country_code="IT",
+                     tax_regime="RF01",
+                     address=Address(street="Via Perù 1", postcode="20100", city="Milano")),
+        lines=[LineItem("Caffè", Decimal("1"), Decimal("1.00"), Decimal("10"))],
+    )
+
+    assert invoice_pdf(accentata).startswith(b"%PDF-")
+
+
+def test_a_unicode_font_makes_the_greek_invoice_work():
+    """La via d'uscita dichiarata dall'errore deve funzionare davvero."""
+    import glob
+    import os
+
+    import reportlab
+
+    from einvoice.pdf import PdfBranding
+
+    # Un TTF qualunque presente sul sistema di test: qui basta che la
+    # registrazione e il controllo di copertura passino per i caratteri usati.
+    candidati = glob.glob(os.path.join(os.path.dirname(reportlab.__file__), "fonts", "*.ttf"))
+    assert candidati, "reportlab non espone nessun TTF: il test non può girare"
+
+    latina = _invoice()
+    blob = invoice_pdf(latina, branding=PdfBranding(font_path=candidati[0]))
+    assert blob.startswith(b"%PDF-")
+
+
+def test_a_font_file_that_is_not_a_font_says_so():
+    from einvoice.pdf import PdfBranding, PdfFontUnavailable
+
+    with pytest.raises(PdfFontUnavailable, match="non caricabile"):
+        invoice_pdf(_invoice(), branding=PdfBranding(font_path="/non/esiste/font.ttf"))
+
+
+def test_the_receipt_pdf_checks_the_alphabet_too(senza_font_di_sistema):
+    from einvoice.pdf import PdfFontUnavailable
+
+    with pytest.raises(PdfFontUnavailable):
+        receipt_pdf(_receipt(country="GR", merchant="Καφενείο"))
+
+
+def test_which_languages_print_without_a_font_is_computed_not_guessed():
+    """Una lista fissa direbbe di sì a una lingua che nel frattempo ha smesso di
+    esserlo — basta che una traduzione cambi e introduca una lettera fuori da
+    Latin-1."""
+    from einvoice.pdf import locales_without_font, needs_unicode_font
+
+    senza = locales_without_font()
+
+    # Il caso comune non deve regredire.
+    assert {"it", "en", "de", "fr", "es"} <= senza
+    assert not needs_unicode_font("it")
+    assert len(senza) == 14
+
+    # E le lingue che un font lo richiedono davvero.
+    for locale in ("el", "ru", "pl", "ar", "zh", "th", "ro", "hu"):
+        assert needs_unicode_font(locale), locale
+        assert locale not in senza
+
+
+def test_the_question_can_be_asked_before_printing():
+    """Scoprire che serve un font quando il cliente chiede la copia significa
+    non dargliela."""
+    from einvoice.pdf import needs_unicode_font
+
+    assert needs_unicode_font("el") is True
+    assert needs_unicode_font(None) is False   # default inglese
+
+
+@pytest.fixture
+def senza_font_di_sistema(monkeypatch):
+    """Toglie il font di sistema, perché altrimenti questi test direbbero cose
+    diverse su macchine diverse: verdi su un portatile che i font ce li ha,
+    rossi in un container `slim` che non ne ha nessuno. Quel che si vuole
+    verificare è il comportamento *senza* font, e va chiesto esplicitamente."""
+    monkeypatch.setattr("einvoice.pdf.SYSTEM_FONT_CANDIDATES", ())
+
+
+def test_a_system_font_is_used_when_the_caller_does_not_supply_one():
+    """Pretendere che ogni chiamante sappia di dover procurare un font per
+    stampare in greco significa che in greco non stampa nessuno."""
+    from einvoice.pdf import system_unicode_font
+
+    if system_unicode_font() is None:
+        pytest.skip("nessun font Unicode di sistema su questa macchina")
+    assert invoice_pdf(_greca()).startswith(b"%PDF-")
+
+
+def test_the_caller_font_wins_over_the_system_one(monkeypatch):
+    """`PdfBranding.font_path` è una scelta, non un suggerimento: si usa quello
+    anche se in giro ci sono font di sistema."""
+    from einvoice.pdf import PdfBranding, system_unicode_font
+
+    font = system_unicode_font()
+    if font is None:
+        pytest.skip("nessun font Unicode di sistema su questa macchina")
+
+    monkeypatch.setattr("einvoice.pdf.SYSTEM_FONT_CANDIDATES", ())
+    assert invoice_pdf(_greca(), branding=PdfBranding(font_path=font)).startswith(b"%PDF-")
+
+
+def test_a_font_that_does_not_cover_the_document_is_rejected_not_used(monkeypatch):
+    """DejaVu è il font che quasi ogni immagine Linux ha, e non copre CJK né
+    thai: prendere il primo font trovato avrebbe stampato caselle vuote in
+    giapponese — lo stesso difetto di prima, con un passaggio in più."""
+    from einvoice.pdf import PdfFontUnavailable
+
+    # Nessun font disponibile copre il documento, di sistema o meno.
+    monkeypatch.setattr("einvoice.pdf._missing_glyphs", lambda texts, font: {"Σ"})
+    with pytest.raises(PdfFontUnavailable):
+        invoice_pdf(_greca())
+
+
+def test_the_error_says_which_fonts_were_tried():
+    """«Non funziona» non aiuta; «ho provato questi e non bastavano» sì."""
+    from einvoice.pdf import PdfFontUnavailable, system_unicode_font
+
+    if system_unicode_font() is None:
+        pytest.skip("nessun font Unicode di sistema su questa macchina")
+
+    import einvoice.pdf as mod
+    original = mod._missing_glyphs
+    try:
+        mod._missing_glyphs = lambda texts, font: {"\u5b57"}
+        with pytest.raises(PdfFontUnavailable) as exc:
+            invoice_pdf(_greca())
+    finally:
+        mod._missing_glyphs = original
+
+    assert "Provati senza successo" in str(exc.value)
+    assert "fonts-noto-cjk" in str(exc.value)
+
+
+# ── chi disegna un PDF proprio ────────────────────────────────────────
+
+
+def test_font_for_text_says_none_when_the_base_fonts_are_enough():
+    """`None` non è un fallimento: è «usa Helvetica», e il PDF resta leggero."""
+    from einvoice.pdf import font_for_text
+
+    assert font_for_text(["Trattoria àèìòù", "Caffè 1,20 €"]) is None
+
+
+def test_font_for_text_gives_a_registered_font_for_other_alphabets():
+    """Deve tornare un font che ReportLab ha già registrato, pronto per
+    `setFont`: restituire un percorso lascerebbe il lavoro a chi chiama, ed è
+    il lavoro che si sbaglia."""
+    from reportlab.pdfbase import pdfmetrics
+
+    from einvoice.pdf import font_for_text, system_unicode_font
+
+    if system_unicode_font() is None:
+        pytest.skip("nessun font Unicode di sistema su questa macchina")
+
+    name = font_for_text(["Καφενείο", "Иванов"])
+    assert name is not None
+    assert name in pdfmetrics.getRegisteredFontNames()
+
+
+def test_font_for_text_raises_rather_than_returning_a_font_that_cannot_draw(
+        senza_font_di_sistema):
+    """Chi disegna a mano vuole saperlo prima di aprire la pagina, per gli
+    stessi motivi per cui lo vuole sapere invoice_pdf."""
+    from einvoice.pdf import PdfFontUnavailable, font_for_text
+
+    with pytest.raises(PdfFontUnavailable):
+        font_for_text(["Καφενείο"])
+
+
+def test_font_for_text_honours_an_explicit_font():
+    from einvoice.pdf import font_for_text, system_unicode_font
+
+    font = system_unicode_font()
+    if font is None:
+        pytest.skip("nessun font Unicode di sistema su questa macchina")
+
+    assert font_for_text(["Καφενείο"], font_path=font) is not None
+
+
+def test_the_euro_sign_is_drawable_by_the_base_fonts():
+    """I font base si disegnano in WinAnsi (CP1252), non in Latin-1, e l'euro
+    sta nella differenza. Trattarlo da carattere indisegnabile significava
+    rifiutare uno scontrino da «12,00 €» su un'immagine senza font."""
+    from einvoice.pdf import font_for_text
+
+    assert font_for_text(["Totale 12,00 €", "Caffè 1,20 €"]) is None
+
+
+def test_a_receipt_with_euro_signs_prints_without_any_system_font(
+        senza_font_di_sistema):
+    """Il caso più comune d'Europa, sull'immagine più spoglia."""
+    assert receipt_pdf(_receipt(country="IT")).startswith(b"%PDF-")
+    assert font_for_text_is_none_for("12,00 €")
+
+
+def font_for_text_is_none_for(text: str) -> bool:
+    from einvoice.pdf import font_for_text
+
+    return font_for_text([text]) is None

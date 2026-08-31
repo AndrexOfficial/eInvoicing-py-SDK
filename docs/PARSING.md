@@ -156,6 +156,102 @@ Il ciclo ricevi → analizza → inoltra è la forma di qualunque flusso di cicl
 passivo, ed è coperto dai test su tutti e 30 i paesi profilati e in entrambe le
 sintassi EN 16931.
 
+## Un file FatturaPA può contenere più fatture
+
+FatturaPA prevede il **lotto**: un solo `FatturaElettronicaHeader` — stesso
+cedente, stesso cessionario — seguito da più `FatturaElettronicaBody`, uno per
+fattura. Non è un caso di scuola: è la forma normale delle forniture ricorrenti
+e di molti flussi di ciclo passivo.
+
+```python
+from einvoice import parse_invoices
+
+for invoice in parse_invoices(received):     # una qualunque delle due sintassi
+    archivia(invoice)
+```
+
+`parse_invoices()` restituisce sempre una lista, per tutti i formati: uno solo
+per UBL e CII, tutti quelli presenti per FatturaPA. È la funzione da usare
+quando il file arriva da fuori e non sai cosa contiene.
+
+`parse_invoice()` resta la forma singolare e su un lotto **solleva**, dicendo
+quante fatture ha trovato:
+
+```
+FatturaPA: il file contiene 3 fatture (lotto). parse_invoice() ne restituisce
+una sola: usa parse_invoices() per leggerle tutte.
+```
+
+Prima restituiva la prima e buttava via le altre senza dire niente, che sul
+ciclo passivo significa fatture che non entrano in contabilità mentre tutto
+sembra funzionare. Un avviso nei log non sarebbe bastato: chi non li legge
+avrebbe continuato a perdere documenti. L'unica opzione che non nasconde nulla è
+fermarsi.
+
+## Lo sconto documento e l'aliquota che il formato non trasporta
+
+`ScontoMaggiorazione` a livello di documento, nello schema FatturaPA, contiene
+`Tipo`, `Percentuale` e `Importo` — **non** `AliquotaIVA`. A quale aliquota lo
+sconto sia stato applicato, il file non lo dice in quel punto.
+
+Conta, però. Su una fattura con più aliquote uno sconto di 5 € tolto
+dall'esente o tolto dal 22% produce due riepiloghi diversi e due totali diversi:
+
+```
+sconto sull'esente : 22% → 93.60 | 0% → 45.00   totale 161.20
+sconto sul 22%     : 22% → 88.60 | 0% → 50.00   totale 160.10
+```
+
+L'informazione c'è, solo altrove: i `DatiRiepilogo` dichiarano l'imponibile per
+aliquota, e la **differenza fra quello e la somma delle righe è lo sconto**. Il
+parser la legge da lì e rimette `vat_rate` al suo posto, così il giro
+ricevi → inoltra riproduce il documento invece di riscriverlo.
+
+L'attribuzione avviene **solo su corrispondenza esatta**, o quando un solo
+bucket si è mosso. Nel dubbio `vat_rate` resta `None`: attribuire a caso
+sarebbe lo stesso spostamento di imponibile, con l'aggravante di sembrare
+intenzionale. Quel che resta non attribuito lo segnala
+`compare_declared_totals`.
+
+## Le ricevute SdI: leggere la risposta, non solo mandare la domanda
+
+Il ciclo non finisce con la trasmissione. SdI risponde con file XML — consegna,
+scarto, mancata consegna, esito del committente — che arrivano dal provider,
+dalla PEC o dal portale, e che ogni integrazione finiva per riparsarsi da sola.
+
+```python
+from einvoice.notifications import parse_sdi_receipt
+
+ricevuta = parse_sdi_receipt(xml)
+ricevuta.kind          # 'NS'
+ricevuta.type          # NotificationType.REJECTED
+ricevuta.sdi_id        # per riconciliare con la trasmissione
+ricevuta.errors        # [SdiError(code='00404', description='Fattura duplicata')]
+
+lifecycle.apply(ricevuta.to_notification())
+```
+
+Su uno scarto il **codice d'errore è il dato più utile dell'intero flusso**:
+dice perché la fattura è stata rifiutata, e senza si ricomincia a tentativi. Un
+`00404` (duplicata) non va ritrasmesso, un `00311` (codice destinatario non
+valido) va corretto e rimandato: sono due azioni opposte, e distinguerle
+richiede il codice.
+
+Sono riconosciute tutte e sette le sigle — `RC`, `NS`, `MC`, `NE`, `DT`, `AT`,
+`EC` — e su `NE`/`EC` l'esito `EC01`/`EC02` diventa il campo `positive`.
+
+**Il namespace non si pretende.** Alcuni intermediari lo riscrivono, altri lo
+tolgono: si guarda il nome locale della radice, come già fa il lettore
+FatturaPA e per lo stesso motivo. Pretenderlo farebbe fallire file
+perfettamente validi.
+
+**I campi opzionali restano opzionali.** Una ricevuta a cui manca un elemento
+non è rotta: è di un tipo che quell'elemento non lo porta, o di un intermediario
+che lo omette. Sollevare lì bloccherebbe la riconciliazione per un dato che
+spesso non serve. Una radice non riconosciuta invece **solleva**, perché chi
+passa un file qui si aspetta una ricevuta e proseguire su un documento diverso è
+peggio che fermarsi.
+
 ## Limiti
 
 - **Non si valida contro lo schema XSD.** Il parser legge quello che trova; un

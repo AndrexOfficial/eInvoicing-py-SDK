@@ -54,7 +54,7 @@ from .models import (
     SocialSecurityFund,
     WithholdingTax,
 )
-from .money import q6
+from .money import D, q2, q6
 from .taxid import normalize_tax_id
 
 __all__ = [
@@ -63,6 +63,8 @@ __all__ = [
     "parse_ubl_xml",
     "parse_cii_xml",
     "parse_fattura_xml",
+    "parse_fattura_batch",
+    "parse_invoices",
     "compare_declared_totals",
 ]
 
@@ -633,11 +635,48 @@ def parse_fattura_xml(xml: bytes | str) -> Invoice:
     elements here, so a FatturaPA round-trip is lossless where a UBL one is not.
     """
     root = _root(xml)
-    # FatturaPA is often transmitted with the p: prefix and sometimes without a
-    # namespace at all (some intermediaries strip it), so search both ways.
-    body = root.find(f"{{{FPA}}}FatturaElettronicaBody") or root.find("FatturaElettronicaBody")
+    bodies = _fattura_bodies(root)
+    if len(bodies) > 1:
+        # Silenziosamente ne leggeva una sola. Su un flusso di fatture ricevute
+        # significa che le altre non entrano in contabilità e nessuno se ne
+        # accorge: il file è valido, il parsing non fallisce, e mancano dei
+        # soldi. Meglio un errore che nomina il numero esatto.
+        raise ValidationError(
+            f"FatturaPA: il file contiene {len(bodies)} fatture (lotto). "
+            "parse_invoice() ne restituisce una sola: usa parse_invoices() per "
+            "leggerle tutte."
+        )
+    return _parse_fattura_body(root, bodies[0])
+
+
+def _fattura_bodies(root) -> list:
+    """I ``FatturaElettronicaBody`` del file, comunque sia stato spedito.
+
+    FatturaPA arriva col prefisso ``p:``, a volte senza namespace del tutto
+    (certi intermediari lo tolgono): si cerca in entrambi i modi.
+    """
+    bodies = root.findall(f"{{{FPA}}}FatturaElettronicaBody") or \
+        root.findall("FatturaElettronicaBody")
+    if not bodies:
+        raise ValidationError("FatturaPA: header o body mancante")
+    return bodies
+
+
+def parse_fattura_batch(xml: bytes | str) -> list[Invoice]:
+    """Tutte le fatture di un file FatturaPA, anche quando ce n'è una sola.
+
+    Un file può contenere più ``FatturaElettronicaBody`` con lo stesso cedente e
+    lo stesso cessionario — è un **lotto**, ed è come si mandano più fatture
+    allo stesso cliente in una trasmissione. L'intestazione è condivisa: cambia
+    solo il corpo.
+    """
+    root = _root(xml)
+    return [_parse_fattura_body(root, body) for body in _fattura_bodies(root)]
+
+
+def _parse_fattura_body(root, body) -> Invoice:
     header = root.find(f"{{{FPA}}}FatturaElettronicaHeader") or root.find("FatturaElettronicaHeader")
-    if body is None or header is None:
+    if header is None:
         raise ValidationError("FatturaPA: header o body mancante")
 
     general = body.find("DatiGenerali/DatiGeneraliDocumento")
@@ -743,7 +782,7 @@ def parse_fattura_xml(xml: bytes | str) -> Invoice:
         ))
 
     doc_type = _text(general, "TipoDocumento", {})
-    return Invoice(
+    invoice = Invoice(
         number=_text(general, "Numero", {}) or "—",
         date=issue,
         seller=_fpa_party(header.find("CedentePrestatore"), seller=True),
@@ -767,6 +806,79 @@ def parse_fattura_xml(xml: bytes | str) -> Invoice:
         art73=_text(general, "Art73", {}) == "SI",
         exigibility=_fpa_exigibility(body),
     )
+    _attribute_document_allowances(invoice, body)
+    return invoice
+
+
+def _attribute_document_allowances(invoice: Invoice, body: ET.Element) -> None:
+    """Rimette allo sconto documento l'aliquota a cui appartiene.
+
+    ``ScontoMaggiorazione`` a livello documento, nello schema FatturaPA, **non
+    ha** ``AliquotaIVA``: il campo non esiste, quindi non è che il renderer lo
+    perda — il formato non lo trasporta. Rileggendo il file lo sconto restava
+    senza aliquota e, alla riemissione, finiva nel bucket di default (quello
+    della prima riga). Su una fattura con più aliquote questo **sposta
+    imponibile da un'aliquota all'altra**: cinque euro di sconto che nascono
+    sull'esente e rinascono sul 22% inventano 1,10 € di IVA, e il flusso
+    «ricevi → archivia → inoltra» che questo pacchetto documenta lo faceva in
+    silenzio.
+
+    L'informazione però nel file c'è, solo in un altro punto: i
+    ``DatiRiepilogo`` dichiarano l'imponibile per aliquota, e la differenza fra
+    quello e la somma delle righe *è* lo sconto. Qui si legge quella
+    differenza.
+
+    Si assegna **solo su corrispondenza esatta**, o quando un solo bucket si
+    muove. Nel dubbio si lascia ``None``: un'attribuzione inventata sarebbe lo
+    stesso spostamento di imponibile di prima, con l'aggravante di sembrare
+    intenzionale. Quel che resta non attribuito lo segnala
+    :func:`compare_declared_totals`.
+    """
+    pending = [ac for ac in invoice.allowances_charges if ac.vat_rate is None]
+    if not pending:
+        return
+
+    declared: dict[str, Decimal] = {}
+    for riep in body.findall("DatiBeniServizi/DatiRiepilogo"):
+        rate, taxable = _text(riep, "AliquotaIVA", {}), _text(riep, "ImponibileImporto", {})
+        if rate is None or taxable is None:
+            continue
+        declared[f"{_dec(rate):.2f}"] = declared.get(f"{_dec(rate):.2f}", Decimal("0")) + _dec(taxable)
+    if not declared:
+        return
+
+    # L'imponibile per aliquota *senza* gli sconti documento: righe più cassa
+    # previdenziale, esattamente come lo compone ``vat_summary``.
+    computed: dict[str, Decimal] = {}
+    for ln in invoice.lines:
+        key = f"{ln.vat_rate:.2f}"
+        computed[key] = computed.get(key, Decimal("0")) + ln.total
+    for fund in invoice.funds:
+        key = f"{fund.vat_rate:.2f}"
+        computed[key] = computed.get(key, Decimal("0")) + fund.amount
+
+    deltas = {
+        key: q2(value) - declared[key]
+        for key, value in computed.items()
+        if key in declared and q2(value) != declared[key]
+    }
+    if not deltas:
+        return
+
+    for ac in pending:
+        wanted = -ac.signed          # uno sconto abbassa il bucket in cui sta
+        match = next((k for k, d in deltas.items() if d == wanted), None)
+        if match is None and len(deltas) == 1 and len(pending) == 1:
+            # Un solo bucket si è mosso: lo sconto non può che stare lì, anche
+            # se l'importo non torna al centesimo — quello è un problema di
+            # aritmetica del fornitore, e lo dice compare_declared_totals.
+            match = next(iter(deltas))
+        if match is None:
+            continue
+        ac.vat_rate = D(match)
+        deltas[match] -= wanted
+        if deltas[match] == 0:
+            del deltas[match]
 
 
 def _fpa_nature(code: str | None) -> VatNature | None:
@@ -827,3 +939,20 @@ def compare_declared_totals(xml: bytes | str) -> dict[str, Decimal | None]:
         "computed": computed,
         "difference": None if declared is None else declared - computed,
     }
+
+
+def parse_invoices(xml: bytes | str) -> list[Invoice]:
+    """Tutte le fatture di un documento, qualunque sia il formato.
+
+    UBL e CII portano una fattura per file: la lista ne contiene una. FatturaPA
+    può portarne più d'una nello stesso file — ed è il caso per cui questa
+    funzione esiste, perché :func:`parse_invoice` ne restituiva una sola e le
+    altre sparivano senza un errore.
+
+    Chi legge fatture in ingresso dovrebbe usare questa e ciclare: costa una
+    riga in più e toglie la possibilità di perdere una fattura per sempre.
+    """
+    standard = detect_standard(xml)
+    if standard == "fatturapa":
+        return parse_fattura_batch(xml)
+    return [parse_invoice(xml)]
