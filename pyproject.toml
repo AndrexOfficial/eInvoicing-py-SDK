@@ -41,13 +41,13 @@ providers = ["httpx>=0.24"]
 signing = ["cryptography>=50.0.0"]
 # Il PDF è la copia che legge una persona, non il documento fiscale:
 # chi emette solo XML non se la porta dietro.
-pdf = ["reportlab>=4"]
-all = ["httpx>=0.24", "cryptography>=50.0.0", "reportlab>=4"]
+pdf = ["reportlab>=5.0.1"]
+all = ["httpx>=0.24", "cryptography>=50.0.0", "reportlab>=5.0.1"]
 dev = ["httpx>=0.24", "cryptography>=50.0.0", "pytest>=9.1.1", "ruff>=0.16.4", "mypy>=2.3.1",
        # Solo per il test che prova che print_receipt guida davvero
        # l'interfaccia di python-escpos (il loro Dummy raccoglie i byte).
        # Il core resta senza dipendenze: il modulo non la importa mai.
-       "python-escpos>=3.1", "reportlab>=4"]
+       "python-escpos>=3.1", "reportlab>=5.0.1"]
 
 [project.scripts]
 einvoice = "einvoice.cli:main"
