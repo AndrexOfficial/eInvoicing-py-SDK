@@ -43,7 +43,7 @@ signing = ["cryptography>=50.0.0"]
 # chi emette solo XML non se la porta dietro.
 pdf = ["reportlab>=4"]
 all = ["httpx>=0.24", "cryptography>=50.0.0", "reportlab>=4"]
-dev = ["httpx>=0.24", "cryptography>=50.0.0", "pytest>=9.1.1", "ruff>=0.16.4", "mypy>=2.3.1",
+dev = ["httpx>=0.24", "cryptography>=50.0.0", "pytest>=9.1.1", "ruff>=0.16.5", "mypy>=2.3.1",
        # Solo per il test che prova che print_receipt guida davvero
        # l'interfaccia di python-escpos (il loro Dummy raccoglie i byte).
        # Il core resta senza dipendenze: il modulo non la importa mai.
