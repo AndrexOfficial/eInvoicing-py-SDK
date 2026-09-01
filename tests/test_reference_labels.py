@@ -83,3 +83,55 @@ def test_the_label_is_none_when_the_value_is_absent():
     assert _label("mandate", None, "it") is None
     assert _label("mandate", "", "it") is None
     assert _label("mandate", "inesistente", "it") is None
+
+
+# ── the category vocabulary carries its own words too ────────────────────
+#
+# The rate chips in both products showed a tooltip listing what a rate covers:
+# "accommodation, restaurant, passenger_transport, electricity". Raw Annex III
+# identifiers, next to a chip already labelled "10% · ridotta". Same defect as
+# the rate kinds, one layer down — and it stayed because a tooltip is the last
+# thing anyone reads in review.
+
+
+@pytest.mark.parametrize("locale", LOCALES)
+def test_every_product_category_has_a_label(locale: str):
+    """Anche quelle che nessun paese mappa: una categoria senza traduzione si
+    presenterebbe grezza al primo paese che la usa, cioè dove nessuno guarda."""
+    from einvoice.rates import ProductCategory
+
+    for categoria in ProductCategory:
+        chiave = f"product_category.{categoria.value}"
+        etichetta = translate(chiave, locale)
+        assert etichetta != chiave, f"{categoria.value} non tradotta in {locale}"
+        assert etichetta.strip()
+
+
+def test_the_rates_carry_the_words_next_to_the_identifiers():
+    it = country_reference("IT", "it")
+    ridotta = next(r for r in it["rates"] if r["rate"] == "10")
+    assert ridotta["categories"][:2] == ["accommodation", "restaurant"]
+    assert ridotta["category_labels"][:2] == ["alloggio", "ristorazione"]
+    # Le due liste sono parallele: chi disegna le accoppia per indice.
+    assert len(ridotta["categories"]) == len(ridotta["category_labels"])
+
+
+def test_no_country_has_a_rate_whose_categories_lack_words():
+    for paese in all_country_references("fr"):
+        for aliquota in paese["rates"]:
+            assert len(aliquota["categories"]) == len(aliquota["category_labels"])
+            assert all(aliquota["category_labels"]), f"{paese['code']}: etichetta vuota"
+
+
+def test_the_picker_is_translated_and_never_empty():
+    """Un buco in una tendina è peggio di una parola non tradotta: qui
+    l'etichetta ripiega sull'identificatore e non torna mai ``None``."""
+    from einvoice.reference import product_categories
+
+    for locale in ("it", "de", "ja"):
+        voci = product_categories(locale)
+        assert len(voci) >= 29
+        assert all(v["label"] and v["label"].strip() for v in voci)
+
+    # Senza lingua si ottiene l'inglese, e la firma resta compatibile.
+    assert all(v["label"] for v in product_categories())

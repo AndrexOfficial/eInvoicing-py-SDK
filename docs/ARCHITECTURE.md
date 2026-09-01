@@ -127,6 +127,36 @@ Due regole nella conversione:
   la stessa divergenza che questo modulo era nato per chiudere. Un'etichetta
   che manca torna `None`, mai l'identificatore: altrimenti «non tradotto» e
   «tradotto» diventano indistinguibili.
+- **Le categorie di prodotto pure.** `product_categories(locale)` porta un
+  `label`, e ogni aliquota affianca `category_labels` a `categories` — è il
+  testo del suggerimento sulla pastiglia, che mostrava «accommodation,
+  restaurant, passenger_transport». Qui però l'etichetta **ripiega
+  sull'identificatore** invece di tornare `None`: è sempre e solo testo da
+  mostrare, e un buco in una tendina è peggio di una parola non tradotta. La
+  differenza con `b2b_label` è deliberata e va tenuta: lì l'assenza è
+  un'informazione.
+
+### Due piani di regole, e perché non diventano uno
+
+Quello che **vendi** decide l'aliquota: è `ProductCategory`, mappata paese per
+paese in `einvoice.rates`, datata e volutamente parziale. Quello che **sei**
+decide il regime: è `BusinessType` in `einvoice.business`, e porta con sé i
+regimi che seguono l'attività e non la merce — margine per le agenzie di
+viaggio, forfait agricolo, margine per l'usato, piccole imprese.
+
+`business_profile()` **risolve** nel primo piano, non lo riscrive: chiede alla
+tabella per paese quale aliquota tocca a ogni categoria che quell'attività
+cede. È l'unica forma che regge, perché la tentazione — una tabella «regole
+fiscali per tipo di attività, paese per paese» — produrrebbe due fonti della
+stessa verità che divergono il giorno in cui una si muove. È la divergenza che
+`einvoice.reference` è nato per chiudere, e c'è un test che fallisce se
+qualcuno scrive un'aliquota dentro `business.py`.
+
+Per la stessa ragione qui non ci sono soglie nazionali né opzioni nazionali:
+gli Stati scelgono se offrire il forfait agricolo, fissano i propri limiti per
+le piccole imprese, esentano enti sportivi diversi l'uno dall'altro. Il
+pacchetto nomina il regime e l'articolo della direttiva — l'unico appiglio che
+non si muove — e lascia il resto a chi ha un commercialista.
 
 ## Europa: EN 16931, PEPPOL, CIUS
 

@@ -4,6 +4,62 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-09-01
+
+L'ultimo pezzo di vocabolario che arrivava crudo sugli schermi.
+
+### Added
+
+- **`product_category.*` nel catalogo i18n**, ventinove voci in trentuno
+  lingue. È il vocabolario dell'**Allegato III** della direttiva IVA — quello
+  che risponde alla domanda «a cosa si applica questa aliquota» — e come per
+  `rate_kind` la direttiva è pubblicata in tutte le lingue ufficiali
+  dell'Unione: sono ricerche, non invenzioni.
+- **`product_categories(locale)`** aggiunge `label` a ogni voce, e
+  **`country_reference(code, locale)`** affianca `category_labels` a
+  `categories` su ogni aliquota. Entrambi i parametri sono opzionali: le firme
+  restano compatibili.
+
+- **`einvoice.business`** — che *attività* sei, e cosa ne segue.
+  `BusinessType` (33 voci) dichiara cosa un'attività tipicamente cede, e
+  `business_profile(business, country, locale)` risponde «quali aliquote
+  applico qui» **risolvendo nella tabella per paese**, non riscrivendola.
+  `VatScheme` porta invece i regimi che seguono l'attività e non la merce —
+  margine per le agenzie di viaggio (art. 306-310), forfait agricolo
+  (295-305), margine per l'usato (311-325), piccole imprese (282-292d), oro da
+  investimento (344-356), attività esenti (132, 135) — ciascuno col proprio
+  riferimento alla direttiva 2006/112/CE.
+
+### Why
+
+I due prodotti che incorporano il pacchetto mostravano il suggerimento della
+pastiglia così: «accommodation, restaurant, passenger_transport, electricity»,
+accanto a una pastiglia già etichettata «10% · ridotta». Stesso difetto dei
+tipi di aliquota, un piano più sotto — ed è rimasto più a lungo perché un
+tooltip è l'ultima cosa che qualcuno legge in revisione.
+
+**Due piani di regole, non uno.** Quello che *vendi* decide l'aliquota e vive
+in `einvoice.rates`, datato e volutamente parziale. Quello che *sei* decide il
+regime e vive in `einvoice.business`. Una seconda tabella di diritto nazionale
+per tipo di attività — «le regole fiscali di ogni business, paese per paese» —
+contraddirebbe la prima il giorno in cui una delle due si muove, ed è
+esattamente la divergenza che `einvoice.reference` è nato per chiudere. Perciò
+non c'è, e ci sono dei test che impediscono che compaia. Il pacchetto non
+porta soglie nazionali, opzioni nazionali né esenzioni nazionali: gli Stati
+scelgono se offrire il forfait agricolo, fissano i propri limiti per le
+piccole imprese ed esentano enti sportivi diversi l'uno dall'altro.
+
+Due dettagli che una tabella scritta a occhio sbaglia, e che qui sono
+codificati con la fonte: la **scuola guida non è istruzione esente** (Corte di
+giustizia UE, C-449/17, 14 marzo 2019, patenti B e C1), e l'**esenzione
+sanitaria riguarda le persone**, quindi il veterinario non vi rientra.
+
+**Dove l'etichetta ripiega e dove no.** `category_labels` e il `label` del
+picker ripiegano sull'identificatore: sono sempre e solo testo da mostrare, e
+un buco in una tendina è peggio di una parola non tradotta. `b2b_label` e
+`kind_label` invece restano `None` quando mancano, perché lì l'assenza è
+un'informazione — distingue «non tradotto» da «tradotto».
+
 ## [0.8.0] — 2026-08-31
 
 Il pacchetto smette di credere a quello che ha appena scritto. Le tre

@@ -29,6 +29,14 @@ Quick start (engine)::
                             get_transport("file", TransportConfig(name="file")))
     result = await engine.process(invoice)
 """
+from .business import (
+    BusinessType,
+    VatScheme,
+    business_profile,
+    business_schemes,
+    business_supplies,
+    business_types,
+)
 from .conservation import (
     ConservationProvider,
     WebhookConservationProvider,
@@ -268,9 +276,15 @@ from .transport import (
     transport_for_provider,
 )
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 __all__ = [
+    "business_types",
+    "business_supplies",
+    "business_schemes",
+    "business_profile",
+    "VatScheme",
+    "BusinessType",
     # domain
     "Invoice", "Party", "Address", "LineItem", "Payment", "VatSummary", "Advisory",
     "AllowanceCharge", "WithholdingTax", "SocialSecurityFund",

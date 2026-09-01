@@ -108,6 +108,12 @@ def _rates(code: str, locale: str | None = None) -> list[dict[str, Any]]:
             # stampavano «super_reduced» accanto a etichette tradotte.
             "kind_label": _label("rate_kind", r.kind.value, locale),
             "categories": [c.value for c in r.categories],
+            # Le stesse categorie, con la parola che legge una persona. È il
+            # testo del suggerimento sulla pastiglia dell'aliquota, che finora
+            # mostrava «accommodation, restaurant, passenger_transport».
+            "category_labels": [
+                _label("product_category", c.value, locale) or c.value for c in r.categories
+            ],
             "note": r.note or None,
         }
         for r in rates_for(code)
@@ -185,15 +191,27 @@ def all_country_references(locale: str | None = None) -> list[dict[str, Any]]:
     return [country_reference(code, locale) for code in sorted(supported_countries())]
 
 
-def product_categories() -> list[dict[str, Any]]:
+def product_categories(locale: str | None = None) -> list[dict[str, Any]]:
     """The category vocabulary, for a "what is being sold" picker.
 
     ``commonly_exempt`` marks the categories that carry no rate at all rather
     than a reduced one — the distinction that decides whether input VAT is
     deductible, and the one most often collapsed into "0%".
+
+    ``label`` è il nome leggibile nella lingua chiesta; ``value`` resta perché
+    è l'identificatore su cui il codice si dirama.
     """
     return [
-        {"value": c.value, "commonly_exempt": c in COMMONLY_EXEMPT}
+        {
+            "value": c.value,
+            # Ripiega sull'identificatore invece di tornare ``None``: questa è
+            # sempre e solo testo da mostrare, e un buco in una tendina è
+            # peggio di una parola non tradotta. Diverso da ``b2b_label``, dove
+            # l'assenza è un'informazione — lì il ``None`` distingue «non
+            # tradotto» da «tradotto».
+            "label": _label("product_category", c.value, locale) or c.value,
+            "commonly_exempt": c in COMMONLY_EXEMPT,
+        }
         for c in sorted(ProductCategory, key=lambda c: c.value)
     ]
 
