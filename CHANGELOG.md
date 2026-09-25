@@ -4,6 +4,114 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-09-25
+
+I documenti intorno alla fattura — e la fattura controllata contro lo schema
+ufficiale, per la prima volta.
+
+### Added
+
+- **`einvoice.documents`** — preventivo (`Quote`), fattura pro forma
+  (`ProForma`) e documento di trasporto (`DeliveryNote`, DPR 472/1996) accanto
+  ai due documenti fiscali. Sono tipi separati e **nessun renderer fiscale li
+  accetta** (`RenderError` prima di scrivere un byte): una pro forma trasmessa
+  per errore è una fattura, e annullarla richiede una nota di credito.
+  Conversioni esplicite (`Quote.to_proforma`, `to_invoice`, `to_delivery_note`,
+  `ProForma.to_invoice`) che copiano in profondità e non ereditano mai numero e
+  data; preventivo e pro forma **sommano con lo stesso codice** della fattura
+  (`_TotalsMixin`), quindi la fattura che nasce da un preventivo ha i suoi
+  stessi totali per costruzione.
+- **`deferred_invoice(ddt, …)`** — la fattura differita TD24 (art. 21 c.4
+  lett. a DPR 633/72): righe dei DDT in ordine di data, `DatiDDT` per ciascuno
+  con le righe coperte, i riferimenti d'ordine portati avanti; rifiuta DDT di
+  clienti diversi o ripetuti; prezza le righe senza prezzo con `pricing=`.
+  `Invoice.check()` controlla i termini: `deferred_mixed_months`,
+  `deferred_late` (oltre il 15 del mese successivo), `deferred_before_delivery`.
+- **`credit_note_for(invoice, …)`** — la nota di credito costruita dalla
+  fattura: intera, per righe (la merce resa, sconti riproporzionati) o per
+  importo **ripartito sulle aliquote della fattura** al centesimo. Stornare a
+  un'aliquota sola — com'era facile fare a mano — sposta IVA da un'aliquota
+  all'altra.
+- **Stati** dei documenti commerciali: `initial_status`, `next_statuses`,
+  `can_transition`, `transition` (`IllegalTransition` con gli stati ammessi).
+- **`TransportDetails` / `Carrier`** e `Invoice.transport`: causale del
+  trasporto, a cura di, vettore, colli, pesi, aspetto dei beni, inizio
+  trasporto, porto, resa, destinazione — sul DDT e sulla *fattura
+  accompagnatoria* (`DatiTrasporto`).
+- **PDF** per tutti: `quote_pdf`, `proforma_pdf`, `delivery_note_pdf`,
+  `document_pdf`. Il DDT con le tre firme; la pro forma con la dichiarazione
+  che non è una fattura; il preventivo con la validità e lo spazio per
+  l'accettazione. `einvoice pdf` accetta qualunque documento.
+- **JSON** per tutti: `document_to_dict` / `document_from_dict` (+ `_json`) con
+  un discriminante `"kind"`; senza `kind` è una fattura, come prima.
+- **`einvoice.formats.latin`** — `to_latin` e `unwritable_characters`: il testo
+  nell'alfabeto che FatturaPA accetta (vedi *Fixed*).
+- 50 chiavi i18n nuove × 31 lingue per i documenti.
+- **Test contro lo schema XSD ufficiale 1.2.3** (`tests/schemas/fatturapa`,
+  `lxml` fra le dipendenze di sviluppo) su una matrice di fatture.
+
+### Fixed
+
+Tutti trovati validando contro lo schema ufficiale o contro l'elenco dei
+controlli SdI, e nessuno faceva fallire un test: renderer e parser sbagliavano
+d'accordo.
+
+- **`DatiDDT` aveva la forma sbagliata**: scritto come un ordine d'acquisto
+  (`IdDocumento`/`Data`) invece di `NumeroDDT`/`DataDDT`. Ogni fattura che citava
+  un DDT era un file che SdI scarta (`00200`).
+- **I riferimenti seguivano l'ordine del chiamante**: `DatiGenerali` è una
+  sequence, e una nota di credito con fattura collegata e ordine d'acquisto
+  nell'ordine «sbagliato» era scartata.
+- **Lo sconto di riga era scritto come totale di riga**, mentre in FatturaPA è
+  **per unità**: SdI ricalcola `(PrezzoUnitario − sconti) × Quantita` (00423).
+  Con quantità diversa da 1 il file era scartato. Il renderer ora ripete il
+  calcolo di SdI sui valori scritti e solleva `RenderError` se non torna.
+- **Quantità a 2 decimali**: 1,125 kg diventava «1.13» accanto a un totale
+  calcolato su 1,125 (00423). Ora fino a 8, come lo schema.
+- **Reso come riga negativa con quantità negativa**: `QuantitaType` non ha
+  segno. Ora quantità positiva a prezzo negativo — stesso importo.
+- **`Beneficiario`** scritto dopo l'importo, mentre è il primo elemento di
+  `DettaglioPagamento` (il commento nel codice diceva il contrario).
+- **TD07/TD08/TD09 nel tracciato ordinario**, che non li ammette: ora
+  `RenderError` (sono della fattura semplificata, formato FSM10).
+- **Testo fuori da Latin-1**: «Pizza d’autore» (apostrofo tipografico) o un
+  trattino lungo rendevano il file non conforme. Ora la tipografia si riscrive,
+  le lettere si piegano, le decorazioni cadono, e le lettere senza grafia latina
+  fermano il documento con un errore che le nomina. Lunghezze massime per campo.
+- **Causale oltre 200 caratteri**: ora più elementi `Causale`; il parser ne
+  leggeva solo il primo.
+- **IBAN con spazi**, **codice fiscale minuscolo**, **REA senza trattino**
+  (Ufficio non di due lettere): ora normalizzati, o un errore chiaro.
+- **Il parser ignorava le percentuali**: uno sconto `Percentuale` di una
+  fattura ricevuta valeva zero, e poiché i totali si ricalcolano dalle righe il
+  debito risultava più alto. Ora in cascata, come SdI; anche di documento.
+- **Il parser buttava via `RiferimentoNumeroLinea`** di tutti i riferimenti.
+- **UBL/CII scrivevano più riferimenti DDT e di contratto**, mentre BT-16 e
+  BT-12 sono 0..1 (UBL-SR-03, UBL-SR-01): ora il primo.
+- **Il PDF di una nota di credito era intitolato «FATTURA»**; mostrava il
+  codice `MP05` invece di «Bonifico», nessun IBAN, nessuno sconto, nessuna
+  ritenuta né netto a pagare, e troncava le descrizioni a 60 caratteri.
+
+### Changed
+
+- `validate()` (profilo IT) riproduce altri controlli di contenuto SdI:
+  **00425** (numero senza cifre; al massimo 20 caratteri ASCII), **00418**
+  (documento anteriore alla fattura collegata), **00471** (cedente uguale al
+  cessionario per TD01/02/03/06/16–20/24/25/28), DDT senza data, riferimenti a
+  righe inesistenti. Erano scarti che arrivavano giorni dopo.
+- La partita IVA in `IdFiscaleIVA` è scritta normalizzata.
+
+### Why
+
+Il pacchetto sapeva fare la fattura e la nota di credito, e i prodotti che lo
+incorporano si stavano costruendo il resto — preventivi, pro forma, bolle — per
+conto proprio, con il difetto prevedibile: una pro forma salvata come una
+fattura con un flag, e una nota di credito stornata tutta all'aliquota
+predefinita. Scrivendo la fattura differita, che deve citare i DDT, è emerso che
+il pacchetto li citava in una forma che SdI rifiuta — e che nessun test poteva
+accorgersene, perché il renderer era verificato solo contro il proprio parser.
+Lo schema ufficiale è l'unico giudice che non condivide i nostri errori.
+
 ## [0.9.0] — 2026-09-01
 
 L'ultimo pezzo di vocabolario che arrivava crudo sugli schermi.

@@ -25,14 +25,19 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from .documents import DeliveryLine, DeliveryNote, ProForma, Quote, document_kind
 from .enums import (
+    DocumentKind,
     DocumentType,
+    Freight,
     PaymentMeans,
     TransmissionFormat,
+    TransportBy,
+    TransportReason,
     VatExigibility,
     VatNature,
     WithholdingType,
@@ -43,17 +48,25 @@ from .models import (
     AllowanceCharge,
     Attachment,
     BankAccount,
+    Carrier,
     DocumentReference,
     Invoice,
     LineItem,
     Party,
     Payment,
     SocialSecurityFund,
+    TransportDetails,
     WithholdingTax,
 )
 from .rates import ProductCategory
 
-__all__ = ["invoice_to_dict", "invoice_from_dict", "invoice_to_json", "invoice_from_json"]
+__all__ = [
+    "invoice_to_dict", "invoice_from_dict", "invoice_to_json", "invoice_from_json",
+    "document_to_dict", "document_from_dict", "document_to_json", "document_from_json",
+]
+
+#: Any document :func:`document_to_dict` knows how to write.
+Document = Invoice | Quote | ProForma | DeliveryNote
 
 
 # ────────────────────────────────────────────────────────────── decode ──
@@ -186,6 +199,96 @@ def _payment(data: dict, index: int) -> Payment:
     )
 
 
+def _opt_datetime(value: Any, field: str) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{field}: data e ora non valide ({value!r}), attese in ISO 8601") from exc
+
+
+def _carrier(data: Any, context: str) -> Carrier | None:
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValidationError(f"{context}: atteso un oggetto")
+    return Carrier(
+        name=_require(data, "name", context),
+        vat_number=data.get("vat_number"),
+        country_code=data.get("country_code", "IT"),
+        tax_code=data.get("tax_code"),
+        address=_address(data.get("address"), context),
+        license_number=data.get("license_number"),
+    )
+
+
+def _transport(data: Any, context: str = "transport") -> TransportDetails | None:
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValidationError(f"{context}: atteso un oggetto")
+    packages = data.get("packages")
+    return TransportDetails(
+        reason=_enum(TransportReason, data.get("reason"), f"{context}.reason") or TransportReason.SALE,
+        reason_text=data.get("reason_text"),
+        by=_enum(TransportBy, data.get("by"), f"{context}.by") or TransportBy.SENDER,
+        carrier=_carrier(data.get("carrier"), f"{context}.carrier"),
+        means=data.get("means"),
+        packages=int(packages) if packages not in (None, "") else None,
+        goods_appearance=data.get("goods_appearance"),
+        gross_weight=_opt_dec(data.get("gross_weight"), f"{context}.gross_weight"),
+        net_weight=_opt_dec(data.get("net_weight"), f"{context}.net_weight"),
+        weight_unit=data.get("weight_unit", "kg"),
+        start=_opt_datetime(data.get("start"), f"{context}.start"),
+        freight=_enum(Freight, data.get("freight"), f"{context}.freight"),
+        incoterm=data.get("incoterm"),
+        delivery_address=_address(data.get("delivery_address"), f"{context}.delivery_address"),
+    )
+
+
+def _references(data: dict) -> list[DocumentReference]:
+    return [
+        DocumentReference(
+            kind=_require(r, "kind", f"references[{i}]"),
+            doc_id=str(_require(r, "doc_id", f"references[{i}]")),
+            date=_opt_date(r.get("date"), f"references[{i}].date"),
+            line_numbers=list(r.get("line_numbers", [])),
+        )
+        for i, r in enumerate(data.get("references", []))
+    ]
+
+
+def _withholdings(data: dict) -> list[WithholdingTax]:
+    return [
+        WithholdingTax(
+            amount=_dec(_require(w, "amount", f"withholdings[{i}]"), f"withholdings[{i}].amount"),
+            rate=_dec(_require(w, "rate", f"withholdings[{i}]"), f"withholdings[{i}].rate"),
+            kind=_enum(WithholdingType, w.get("kind"), f"withholdings[{i}].kind")
+            or WithholdingType.NATURAL_PERSON,
+            reason=w.get("reason", "A"),
+        )
+        for i, w in enumerate(data.get("withholdings", []))
+    ]
+
+
+def _funds(data: dict) -> list[SocialSecurityFund]:
+    return [
+        SocialSecurityFund(
+            kind=_require(f, "kind", f"funds[{i}]"),
+            rate=_dec(_require(f, "rate", f"funds[{i}]"), f"funds[{i}].rate"),
+            amount=_dec(_require(f, "amount", f"funds[{i}]"), f"funds[{i}].amount"),
+            taxable=_opt_dec(f.get("taxable"), f"funds[{i}].taxable"),
+            vat_rate=_dec(f.get("vat_rate", 0), f"funds[{i}].vat_rate"),
+            nature=_enum(VatNature, f.get("nature"), f"funds[{i}].nature"),
+            withheld=bool(f.get("withheld", False)),
+        )
+        for i, f in enumerate(data.get("funds", []))
+    ]
+
+
 def invoice_from_dict(data: dict) -> Invoice:
     """Build an :class:`Invoice` from the JSON shape. Raises
     :class:`~einvoice.errors.ValidationError` with the offending path."""
@@ -210,25 +313,8 @@ def invoice_from_dict(data: dict) -> Invoice:
         recipient_pec=data.get("recipient_pec"),
         allowances_charges=[_allowance(a, f"allowances_charges[{i}]")
                             for i, a in enumerate(data.get("allowances_charges", []))],
-        withholdings=[
-            WithholdingTax(
-                amount=_dec(_require(w, "amount", f"withholdings[{i}]"), f"withholdings[{i}].amount"),
-                rate=_dec(_require(w, "rate", f"withholdings[{i}]"), f"withholdings[{i}].rate"),
-                kind=_enum(WithholdingType, w.get("kind"), f"withholdings[{i}].kind")
-                or WithholdingType.NATURAL_PERSON,
-                reason=w.get("reason", "A"),
-            )
-            for i, w in enumerate(data.get("withholdings", []))
-        ],
-        references=[
-            DocumentReference(
-                kind=_require(r, "kind", f"references[{i}]"),
-                doc_id=str(_require(r, "doc_id", f"references[{i}]")),
-                date=_opt_date(r.get("date"), f"references[{i}].date"),
-                line_numbers=list(r.get("line_numbers", [])),
-            )
-            for i, r in enumerate(data.get("references", []))
-        ],
+        withholdings=_withholdings(data),
+        references=_references(data),
         attachments=[
             Attachment(
                 filename=_require(a, "filename", f"attachments[{i}]"),
@@ -242,21 +328,11 @@ def invoice_from_dict(data: dict) -> Invoice:
         split_payment=bool(data.get("split_payment", False)),
         buyer_reference=data.get("buyer_reference"),
         exigibility=_enum(VatExigibility, data.get("exigibility"), "exigibility"),
-        funds=[
-            SocialSecurityFund(
-                kind=_require(f, "kind", f"funds[{i}]"),
-                rate=_dec(_require(f, "rate", f"funds[{i}]"), f"funds[{i}].rate"),
-                amount=_dec(_require(f, "amount", f"funds[{i}]"), f"funds[{i}].amount"),
-                taxable=_opt_dec(f.get("taxable"), f"funds[{i}].taxable"),
-                vat_rate=_dec(f.get("vat_rate", 0), f"funds[{i}].vat_rate"),
-                nature=_enum(VatNature, f.get("nature"), f"funds[{i}].nature"),
-                withheld=bool(f.get("withheld", False)),
-            )
-            for i, f in enumerate(data.get("funds", []))
-        ],
+        funds=_funds(data),
         art73=bool(data.get("art73", False)),
         rounding=_opt_dec(data.get("rounding"), "rounding"),
         payment_terms_note=data.get("payment_terms_note"),
+        transport=_transport(data.get("transport")),
     )
     return invoice
 
@@ -322,6 +398,72 @@ def _line_to_dict(line: LineItem) -> dict:
     })
 
 
+def _carrier_to_dict(carrier: Carrier | None) -> dict | None:
+    if carrier is None:
+        return None
+    return _prune({
+        "name": carrier.name, "vat_number": carrier.vat_number,
+        "country_code": carrier.country_code, "tax_code": carrier.tax_code,
+        "address": _address_to_dict(carrier.address),
+        "license_number": carrier.license_number,
+    })
+
+
+def _transport_to_dict(t: TransportDetails | None) -> dict | None:
+    if t is None:
+        return None
+    return _prune({
+        "reason": t.reason.value, "reason_text": t.reason_text, "by": t.by.value,
+        "carrier": _carrier_to_dict(t.carrier), "means": t.means, "packages": t.packages,
+        "goods_appearance": t.goods_appearance,
+        "gross_weight": _money(t.gross_weight), "net_weight": _money(t.net_weight),
+        "weight_unit": t.weight_unit,
+        "start": t.start.isoformat() if t.start else None,
+        "freight": t.freight.value if t.freight else None, "incoterm": t.incoterm,
+        "delivery_address": _address_to_dict(t.delivery_address),
+    })
+
+
+def _references_to_list(refs: list[DocumentReference]) -> list[dict]:
+    return [
+        _prune({"kind": r.kind, "doc_id": r.doc_id,
+                "date": r.date.isoformat() if r.date else None,
+                "line_numbers": list(r.line_numbers)})
+        for r in refs
+    ]
+
+
+def _payments_to_list(payments: list[Payment]) -> list[dict]:
+    return [
+        _prune({
+            "means": p.means.value,
+            "amount": _money(p.amount),
+            "due_date": p.due_date.isoformat() if p.due_date else None,
+            "condition": p.condition,
+            "account": _prune({
+                "iban": p.account.iban, "bank_name": p.account.bank_name,
+                "holder": p.account.holder, "bic": p.account.bic,
+            }) if p.account else None,
+        })
+        for p in payments
+    ]
+
+
+def _withholdings_to_list(items: list[WithholdingTax]) -> list[dict]:
+    return [{"amount": _money(w.amount), "rate": _money(w.rate),
+             "kind": w.kind.value, "reason": w.reason} for w in items]
+
+
+def _funds_to_list(items: list[SocialSecurityFund]) -> list[dict]:
+    return [
+        _prune({"kind": f.kind, "rate": _money(f.rate), "amount": _money(f.amount),
+                "taxable": _money(f.taxable), "vat_rate": _money(f.vat_rate),
+                "nature": f.nature.value if f.nature else None,
+                "withheld": f.withheld or None})
+        for f in items
+    ]
+
+
 def invoice_to_dict(invoice: Invoice) -> dict:
     """Serialize to the JSON shape :func:`invoice_from_dict` reads back."""
     return _prune({
@@ -334,33 +476,12 @@ def invoice_to_dict(invoice: Invoice) -> dict:
         "seller": _party_to_dict(invoice.seller),
         "buyer": _party_to_dict(invoice.buyer),
         "lines": [_line_to_dict(ln) for ln in invoice.lines],
-        "payments": [
-            _prune({
-                "means": p.means.value,
-                "amount": _money(p.amount),
-                "due_date": p.due_date.isoformat() if p.due_date else None,
-                "condition": p.condition,
-                "account": _prune({
-                    "iban": p.account.iban, "bank_name": p.account.bank_name,
-                    "holder": p.account.holder, "bic": p.account.bic,
-                }) if p.account else None,
-            })
-            for p in invoice.payments
-        ],
+        "payments": _payments_to_list(invoice.payments),
         "recipient_code": invoice.recipient_code,
         "recipient_pec": invoice.recipient_pec,
         "allowances_charges": [_allowance_to_dict(a) for a in invoice.allowances_charges],
-        "withholdings": [
-            {"amount": _money(w.amount), "rate": _money(w.rate),
-             "kind": w.kind.value, "reason": w.reason}
-            for w in invoice.withholdings
-        ],
-        "references": [
-            _prune({"kind": r.kind, "doc_id": r.doc_id,
-                    "date": r.date.isoformat() if r.date else None,
-                    "line_numbers": list(r.line_numbers)})
-            for r in invoice.references
-        ],
+        "withholdings": _withholdings_to_list(invoice.withholdings),
+        "references": _references_to_list(invoice.references),
         "attachments": [
             _prune({"filename": a.filename,
                     "content_base64": base64.b64encode(a.content).decode("ascii"),
@@ -371,18 +492,157 @@ def invoice_to_dict(invoice: Invoice) -> dict:
         "split_payment": invoice.split_payment or None,
         "buyer_reference": invoice.buyer_reference,
         "exigibility": invoice.exigibility.value if invoice.exigibility else None,
-        "funds": [
-            _prune({"kind": f.kind, "rate": _money(f.rate), "amount": _money(f.amount),
-                    "taxable": _money(f.taxable), "vat_rate": _money(f.vat_rate),
-                    "nature": f.nature.value if f.nature else None,
-                    "withheld": f.withheld or None})
-            for f in invoice.funds
-        ],
+        "funds": _funds_to_list(invoice.funds),
         "art73": invoice.art73 or None,
         "rounding": _money(invoice.rounding),
         "payment_terms_note": invoice.payment_terms_note,
+        "transport": _transport_to_dict(invoice.transport),
     })
 
 
 def invoice_to_json(invoice: Invoice, *, indent: int | None = 2) -> str:
     return json.dumps(invoice_to_dict(invoice), indent=indent, ensure_ascii=False)
+
+
+# ─────────────────────────────────────────────── commercial documents ──
+#
+# The same rules as the invoice shape, plus a ``"kind"`` discriminator: a host
+# that stores documents of five kinds in one table reads them back with one
+# call. Invoices keep their own shape — ``document_to_dict(invoice)`` is
+# ``invoice_to_dict`` with the kind added.
+
+
+def _priced_from_dict(data: dict, context: str) -> dict[str, Any]:
+    return {
+        "number": str(_require(data, "number", context)),
+        "date": _date(_require(data, "date", context), f"{context}.date"),
+        "seller": _party(_require(data, "seller", context), "seller"),
+        "buyer": _party(_require(data, "buyer", context), "buyer"),
+        "lines": [_line(ln, i) for i, ln in enumerate(_require(data, "lines", context))],
+        "currency": data.get("currency", "EUR"),
+        "notes": data.get("notes"),
+        "payments": [_payment(p, i) for i, p in enumerate(data.get("payments", []))],
+        "payment_terms_note": data.get("payment_terms_note"),
+        "allowances_charges": [_allowance(a, f"allowances_charges[{i}]")
+                               for i, a in enumerate(data.get("allowances_charges", []))],
+        "withholdings": _withholdings(data),
+        "funds": _funds(data),
+        "stamp_duty": _opt_dec(data.get("stamp_duty"), "stamp_duty"),
+        "rounding": _opt_dec(data.get("rounding"), "rounding"),
+        "references": _references(data),
+    }
+
+
+def _priced_to_dict(doc: Quote | ProForma) -> dict[str, Any]:
+    return {
+        "number": doc.number, "date": doc.date.isoformat(), "currency": doc.currency,
+        "seller": _party_to_dict(doc.seller), "buyer": _party_to_dict(doc.buyer),
+        "lines": [_line_to_dict(ln) for ln in doc.lines],
+        "notes": doc.notes, "payments": _payments_to_list(doc.payments),
+        "payment_terms_note": doc.payment_terms_note,
+        "allowances_charges": [_allowance_to_dict(a) for a in doc.allowances_charges],
+        "withholdings": _withholdings_to_list(doc.withholdings),
+        "funds": _funds_to_list(doc.funds),
+        "stamp_duty": _money(doc.stamp_duty), "rounding": _money(doc.rounding),
+        "references": _references_to_list(doc.references),
+    }
+
+
+def _delivery_line(data: dict, index: int) -> DeliveryLine:
+    context = f"lines[{index}]"
+    return DeliveryLine(
+        description=_require(data, "description", context),
+        quantity=_dec(_require(data, "quantity", context), f"{context}.quantity"),
+        unit_of_measure=data.get("unit_of_measure"),
+        article_code=data.get("article_code"),
+        unit_price=_opt_dec(data.get("unit_price"), f"{context}.unit_price"),
+        vat_rate=_opt_dec(data.get("vat_rate"), f"{context}.vat_rate"),
+        nature=_enum(VatNature, data.get("nature"), f"{context}.nature"),
+        discounts=[_allowance(d, f"{context}.discounts[{i}]")
+                   for i, d in enumerate(data.get("discounts", []))],
+    )
+
+
+def _delivery_line_to_dict(line: DeliveryLine) -> dict:
+    return _prune({
+        "description": line.description, "quantity": _money(line.quantity),
+        "unit_of_measure": line.unit_of_measure, "article_code": line.article_code,
+        "unit_price": _money(line.unit_price), "vat_rate": _money(line.vat_rate),
+        "nature": line.nature.value if line.nature else None,
+        "discounts": [_allowance_to_dict(d) for d in line.discounts],
+    })
+
+
+def document_from_dict(data: dict) -> Document:
+    """Any document from its JSON shape, chosen by ``"kind"``.
+
+    Without a ``kind`` the object is read as an invoice, which is what every
+    JSON this package wrote before 0.10.0 is.
+    """
+    if not isinstance(data, dict):
+        raise ValidationError("Atteso un oggetto JSON alla radice")
+    kind = _enum(DocumentKind, data.get("kind"), "kind")
+    body = {k: v for k, v in data.items() if k != "kind"}
+    if kind in (None, DocumentKind.INVOICE, DocumentKind.CREDIT_NOTE):
+        invoice = invoice_from_dict(body)
+        if kind is DocumentKind.CREDIT_NOTE and not invoice.document_type.is_credit_note:
+            raise ValidationError(
+                f"kind 'credit_note' con document_type {invoice.document_type.value}")
+        return invoice
+    if kind is DocumentKind.QUOTE:
+        return Quote(**_priced_from_dict(body, "quote"),
+                     valid_until=_opt_date(body.get("valid_until"), "valid_until"))
+    if kind is DocumentKind.PROFORMA:
+        return ProForma(
+            **_priced_from_dict(body, "proforma"),
+            document_type=_enum(DocumentType, body.get("document_type"), "document_type")
+            or DocumentType.INVOICE,
+            causale=body.get("causale"),
+        )
+    return DeliveryNote(
+        number=str(_require(body, "number", "delivery_note")),
+        date=_date(_require(body, "date", "delivery_note"), "delivery_note.date"),
+        seller=_party(_require(body, "seller", "delivery_note"), "seller"),
+        buyer=_party(_require(body, "buyer", "delivery_note"), "buyer"),
+        lines=[_delivery_line(ln, i)
+               for i, ln in enumerate(_require(body, "lines", "delivery_note"))],
+        transport=_transport(body.get("transport")) or TransportDetails(),
+        currency=body.get("currency", "EUR"),
+        notes=body.get("notes"),
+        references=_references(body),
+    )
+
+
+def document_to_dict(document: Document) -> dict:
+    """Serialize any document to the shape :func:`document_from_dict` reads."""
+    kind = document_kind(document)
+    if isinstance(document, Invoice):
+        return {"kind": kind.value, **invoice_to_dict(document)}
+    if isinstance(document, Quote):
+        body = {**_priced_to_dict(document),
+                "valid_until": document.valid_until.isoformat() if document.valid_until else None}
+    elif isinstance(document, ProForma):
+        body = {**_priced_to_dict(document), "document_type": document.document_type.value,
+                "causale": document.causale}
+    else:
+        body = {
+            "number": document.number, "date": document.date.isoformat(),
+            "currency": document.currency,
+            "seller": _party_to_dict(document.seller), "buyer": _party_to_dict(document.buyer),
+            "lines": [_delivery_line_to_dict(ln) for ln in document.lines],
+            "transport": _transport_to_dict(document.transport),
+            "notes": document.notes,
+            "references": _references_to_list(document.references),
+        }
+    return {"kind": kind.value, **_prune(body)}
+
+
+def document_to_json(document: Document, *, indent: int | None = 2) -> str:
+    return json.dumps(document_to_dict(document), indent=indent, ensure_ascii=False)
+
+
+def document_from_json(raw: str | bytes) -> Document:
+    try:
+        return document_from_dict(json.loads(raw))
+    except json.JSONDecodeError as exc:
+        raise ValidationError(f"JSON non valido: {exc}") from exc

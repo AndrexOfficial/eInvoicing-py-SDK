@@ -287,3 +287,78 @@ class NotificationType(str, Enum):
     DEADLINE_PASSED = "deadline_passed"  # DT decorrenza termini
     CUSTOMER_OUTCOME = "customer_outcome"  # EC esito committente
     RECEIPT = "receipt"                  # generic acknowledgement
+
+
+# ── i documenti intorno alla fattura ──────────────────────────────────────
+
+
+class DocumentKind(str, Enum):
+    """The five documents a business issues around a sale.
+
+    Only two of them are fiscal. A quote, a pro forma and a delivery note are
+    commercial documents: they carry prices and quantities, and none of them may
+    ever reach SdI or a Peppol access point — a pro forma transmitted by mistake
+    is a real invoice, and undoing it takes a credit note.
+    """
+
+    QUOTE = "quote"                  # preventivo
+    PROFORMA = "proforma"            # fattura pro forma
+    DELIVERY_NOTE = "delivery_note"  # documento di trasporto (DDT)
+    INVOICE = "invoice"              # fattura
+    CREDIT_NOTE = "credit_note"      # nota di credito
+
+    @property
+    def is_fiscal(self) -> bool:
+        """Whether this document is itself a tax document (and is transmitted)."""
+        return self in (DocumentKind.INVOICE, DocumentKind.CREDIT_NOTE)
+
+
+class DocumentStatus(str, Enum):
+    """Where a commercial document stands. Fiscal documents follow
+    :class:`InvoiceState` instead: their status is whatever SdI says it is."""
+
+    DRAFT = "draft"            # preventivo in preparazione
+    SENT = "sent"              # preventivo consegnato al cliente
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+    ISSUED = "issued"          # pro forma o DDT emessi
+    CONVERTED = "converted"    # diventato un altro documento
+    INVOICED = "invoiced"      # DDT fatturato (fattura differita)
+    CANCELLED = "cancelled"
+
+
+class TransportBy(str, Enum):
+    """«Trasporto a cura del» — who moves the goods."""
+
+    SENDER = "sender"          # mittente
+    RECIPIENT = "recipient"    # destinatario
+    CARRIER = "carrier"        # vettore
+
+
+class TransportReason(str, Enum):
+    """«Causale del trasporto».
+
+    It matters beyond the label: a delivery note is also how goods leaving the
+    premises are shown NOT to be a sale (DPR 441/1997 presumes a sale for goods
+    that cannot be accounted for), so "on approval" or "for repair" is what
+    keeps a transfer from being taxed as one.
+    """
+
+    SALE = "sale"                        # vendita
+    RETURN = "return"                    # reso
+    APPROVAL = "approval"                # conto visione
+    PROCESSING = "processing"            # conto lavorazione
+    CONSIGNMENT = "consignment"          # conto deposito
+    FREE_OF_CHARGE = "free_of_charge"    # omaggio
+    LOAN = "loan"                        # comodato d'uso
+    REPAIR = "repair"                    # riparazione
+    TRANSFER = "transfer"                # trasferimento tra sedi
+    OTHER = "other"
+
+
+class Freight(str, Enum):
+    """«Porto» — who pays the carriage."""
+
+    PAID = "paid"          # porto franco: paga il mittente
+    COLLECT = "collect"    # porto assegnato: paga il destinatario

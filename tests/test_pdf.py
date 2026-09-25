@@ -282,7 +282,10 @@ def test_the_error_names_the_characters_and_the_fix(senza_font_di_sistema):
     with pytest.raises(PdfFontUnavailable) as exc:
         invoice_pdf(_greca())
 
-    assert "Σ" in str(exc.value) or "Ο" in str(exc.value)
+    # Which Greek letters the 12-character sample shows depends on every label
+    # the page draws (sorted, accented capitals first); that it names Greek
+    # letters at all is the property.
+    assert any("\u0370" <= ch <= "\u03ff" for ch in str(exc.value))
     assert "DejaVuSans" in str(exc.value)
 
 

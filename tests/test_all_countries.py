@@ -48,7 +48,10 @@ def _domestic_invoice(code: str) -> Invoice:
     party = {"country_code": code}
     seller = Party(name="Seller SA", vat_number=_tax_id(code),
                    address=Address("Main 1", postcode, "City", country=code), **party)
-    buyer = Party(name="Buyer SA", vat_number=_tax_id(code),
+    # A different taxpayer from the seller: an Italian invoice whose buyer is
+    # its own seller is refused by SdI (00471), and elsewhere it is simply not
+    # a plausible domestic invoice.
+    buyer = Party(name="Buyer SA", vat_number="09876543217" if code == "IT" else _tax_id(code),
                   address=Address("Second 2", postcode, "Town", country=code),
                   sdi_code="ABCDEFG" if code == "IT" else None, **party)
     return Invoice(

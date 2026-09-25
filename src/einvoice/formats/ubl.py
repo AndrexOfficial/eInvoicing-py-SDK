@@ -34,7 +34,7 @@ from xml.etree import ElementTree as ET
 from ..models import Invoice, Party, VatNature
 from ..money import D, fmt2, fmt_price, q2
 from ..naming import safe_filename
-from .base import InvoiceRenderer, RenderedDocument
+from .base import InvoiceRenderer, RenderedDocument, first_reference, require_invoice
 
 INV_NS = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
 CN_NS = "urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2"
@@ -131,6 +131,7 @@ def _allowance_charge(parent: ET.Element, *, is_charge: bool, amount, currency: 
 
 def build_ubl_xml(invoice: Invoice, *, customization: str = _CUSTOMIZATION,
                   tax_scheme: str = "VAT") -> bytes:
+    require_invoice(invoice, "UBL")
     invoice.validate()
     cur = invoice.currency
     is_cn = invoice.document_type.is_credit_note
@@ -178,10 +179,14 @@ def build_ubl_xml(invoice: Invoice, *, customization: str = _CUSTOMIZATION,
         _e(idoc, "cbc:ID", ref.doc_id)
         if ref.date:
             _e(idoc, "cbc:IssueDate", ref.date.isoformat())
-    for ref in (r for r in invoice.references if r.kind == "ddt"):
-        _e(_e(root, "cac:DespatchDocumentReference"), "cbc:ID", ref.doc_id)
-    for ref in (r for r in invoice.references if r.kind == "contract"):
-        _e(_e(root, "cac:ContractDocumentReference"), "cbc:ID", ref.doc_id)
+    # 0..1 each in EN 16931 (UBL-SR-03, UBL-SR-01): a deferred invoice that
+    # bills three DDTs keeps all three in FatturaPA, and names the first here.
+    despatch = first_reference(invoice, "ddt")
+    if despatch is not None:
+        _e(_e(root, "cac:DespatchDocumentReference"), "cbc:ID", despatch.doc_id)
+    contract = first_reference(invoice, "contract")
+    if contract is not None:
+        _e(_e(root, "cac:ContractDocumentReference"), "cbc:ID", contract.doc_id)
 
     # Attachments — BG-24. The bytes travel base64 inside the document.
     for att in invoice.attachments:

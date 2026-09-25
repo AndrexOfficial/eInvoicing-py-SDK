@@ -407,6 +407,57 @@ class _ItalyProfile(CountryProfile):
                 raise ValidationError(
                     f"Riga '{ln.description}': Natura e aliquota > 0 sono mutuamente esclusive"
                 )
+        self._validate_sdi_content(invoice)
+
+    #: TipoDocumento for which SdI refuses a seller equal to the buyer (00471).
+    _SELF_BILLING_FORBIDDEN = frozenset({
+        "TD01", "TD02", "TD03", "TD06", "TD16", "TD17", "TD18", "TD19",
+        "TD20", "TD24", "TD25", "TD28",
+    })
+
+    def _validate_sdi_content(self, invoice: Invoice) -> None:
+        """The SdI content checks this package can reproduce before sending.
+
+        Each one is a *scarto* — a rejected file — with its code from the
+        official list («Elenco dei controlli», v1.8), so failing here costs a
+        form error instead of a round trip to SdI and a notice days later.
+        """
+        # 2.1.1.4 <Numero>: String20 (Basic Latin), and 00425 — at least one
+        # digit. A number like "FT-A" is a legal-looking string SdI refuses.
+        number = invoice.number
+        if len(number) > 20 or not all(" " <= ch <= "~" for ch in number):
+            raise ValidationError(
+                f"Numero documento '{number}': FatturaPA ammette al massimo 20 "
+                "caratteri ASCII stampabili")
+        if not any(ch.isdigit() for ch in number):
+            raise ValidationError(
+                f"Numero documento '{number}': deve contenere almeno una cifra "
+                "(SdI scarta con codice 00425)")
+        for ref in invoice.references:
+            doc_id = ref.doc_id or ""
+            if not doc_id or len(doc_id) > 20 or not all(" " <= ch <= "~" for ch in doc_id):
+                raise ValidationError(
+                    f"Riferimento {ref.kind} '{doc_id}': l'identificativo deve essere "
+                    "di 1–20 caratteri ASCII stampabili")
+            if ref.kind == "ddt" and ref.date is None:
+                raise ValidationError(
+                    f"DDT '{doc_id}': manca la data (DataDDT è obbligatoria in FatturaPA)")
+            # 00418: the document may not be dated before an invoice it links
+            # to — the classic shape is a credit note dated the day before the
+            # invoice it corrects.
+            if ref.kind == "invoice" and ref.date is not None and invoice.date < ref.date:
+                raise ValidationError(
+                    f"Documento del {invoice.date:%d/%m/%Y} anteriore alla fattura "
+                    f"collegata '{doc_id}' del {ref.date:%d/%m/%Y} (SdI scarta con "
+                    "codice 00418)")
+        # 00471: for these types seller and buyer cannot be the same taxpayer.
+        if (invoice.document_type.value in self._SELF_BILLING_FORBIDDEN
+                and invoice.seller.vat_number and invoice.buyer.vat_number
+                and invoice.seller.country_code == invoice.buyer.country_code
+                and invoice.seller.normalized_vat() == invoice.buyer.normalized_vat()):
+            raise ValidationError(
+                f"Cedente e cessionario hanno la stessa partita IVA: per "
+                f"{invoice.document_type.value} SdI scarta con codice 00471")
 
 
 class _NoVatNatureProfile(CountryProfile):

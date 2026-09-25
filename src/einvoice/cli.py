@@ -459,12 +459,19 @@ def cmd_renderers(args) -> int:
 
 
 def cmd_pdf(args) -> int:
-    """La copia leggibile: fattura o scontrino, con logo e nella lingua giusta."""
-    from .pdf import PdfUnavailable, invoice_pdf
+    """La copia leggibile di qualunque documento, con logo e nella lingua giusta.
+
+    Il JSON sceglie il documento col suo ``"kind"`` (quote, proforma,
+    delivery_note, invoice, credit_note); senza, è una fattura — come ogni JSON
+    scritto prima della 0.10.0.
+    """
+    from .pdf import PdfUnavailable, document_pdf
+    from .serde import document_from_json
 
     logo = Path(args.logo).read_bytes() if args.logo else None
     try:
-        blob = invoice_pdf(_load_invoice(args.path), logo=logo, locale=args.lang)
+        blob = document_pdf(document_from_json(_load_text(args.path)), logo=logo,
+                            locale=args.lang)
     except PdfUnavailable as exc:
         print(f"errore: {exc}", file=sys.stderr)
         return EXIT_INVALID
@@ -474,12 +481,6 @@ def cmd_pdf(args) -> int:
     else:
         sys.stdout.buffer.write(blob)
     return EXIT_OK
-
-
-def _load_invoice(path: str):
-    from .serde import invoice_from_json
-
-    return invoice_from_json(_load_text(path))
 
 
 def _load_text(path: str) -> str:
@@ -687,8 +688,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("locales", help="lingue disponibili per le etichette di setup").set_defaults(func=cmd_locales)
 
-    pdf = sub.add_parser("pdf", help="la fattura come PDF leggibile (extra [pdf])")
-    pdf.add_argument("path", help="fattura JSON ('-' per stdin)")
+    pdf = sub.add_parser("pdf", help="un documento come PDF leggibile (extra [pdf])")
+    pdf.add_argument("path", help="documento JSON — fattura, nota di credito, preventivo, "
+                                  "pro forma o DDT ('-' per stdin)")
     pdf.add_argument("-o", "--out", help="file di destinazione (default: stdout)")
     pdf.add_argument("--logo", help="immagine del logo da mettere in testa")
     pdf.add_argument("--lang", default=None, choices=available_locales(),

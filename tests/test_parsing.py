@@ -150,7 +150,9 @@ def test_round_trip_preserves_references(standard):
     original = _italian(references=[
         DocumentReference("order", "PO-1"),
         DocumentReference("contract", "C-7"),
-        DocumentReference("ddt", "DDT-3"),
+        # A DDT without its date is not a reference SdI accepts (DataDDT is
+        # mandatory in DatiDDT), so the fixture carries one.
+        DocumentReference("ddt", "DDT-3", date(2026, 8, 20)),
     ])
     restored = parse_invoice(_rendered(original, standard))
     kinds = {r.kind: r.doc_id for r in restored.references}
@@ -367,7 +369,7 @@ def _maximal() -> Invoice:
         attachments=[Attachment("spec.pdf", b"%PDF-1.4", mime="application/pdf")],
         references=[DocumentReference("order", "PO-1", date(2026, 1, 5)),
                     DocumentReference("contract", "C-7"),
-                    DocumentReference("ddt", "DDT-3"),
+                    DocumentReference("ddt", "DDT-3", date(2026, 3, 20)),
                     DocumentReference("invoice", "INV-9", date(2026, 3, 1))],
         stamp_duty=Decimal("2.00"), art73=True, rounding=Decimal("0.01"),
         recipient_code="ABCDEFG",

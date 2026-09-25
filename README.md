@@ -185,6 +185,33 @@ successiva — forma altrettanto valida, e non è una rettifica. Dettagli, famig
 semplificata (`TD07`/`TD08`/`TD09`) e i due rilievi che `check()` produce:
 [docs/CORRECTIONS.md](docs/CORRECTIONS.md).
 
+La nota di credito si può anche **costruire dalla fattura**, con l'IVA ripartita
+sulle aliquote giuste: `credit_note_for(invoice, number=…, date=…, amount=…)`.
+
+### Preventivi, pro forma e DDT
+
+Tre documenti commerciali accanto ai due fiscali, con conversioni esplicite e
+gli stessi totali per costruzione. Nessun renderer fiscale li accetta: una pro
+forma trasmessa per errore **è** una fattura.
+
+```python
+from einvoice import Quote, DeliveryNote, TransportDetails, deferred_invoice, document_pdf
+
+quote = Quote("PR-3/2026", date(2026, 9, 1), seller, buyer, lines,
+              valid_until=date(2026, 9, 30))
+proforma = quote.to_proforma(number="PF-7/2026", date=date(2026, 9, 5))
+invoice = proforma.to_invoice(number="12/2026", date=date(2026, 9, 12))
+
+ddt = quote.to_delivery_note(number="DDT-12/2026", date=date(2026, 9, 20),
+                             transport=TransportDetails(packages=6))
+deferred = deferred_invoice([ddt, ddt_2], number="15/2026", date=date(2026, 9, 30))  # TD24
+
+open("preventivo.pdf", "wb").write(document_pdf(quote))
+```
+
+Dettagli — DDT secondo il DPR 472/1996, fattura differita e i suoi termini,
+stati ammessi, JSON: [docs/DOCUMENTS.md](docs/DOCUMENTS.md).
+
 ### `validate()` vs `check()`
 
 Due livelli, e la distinzione è deliberata.
@@ -566,6 +593,7 @@ leggono, è supportato a metà. Dettagli in [docs/SETUP.md](docs/SETUP.md).
 - [docs/SETUP.md](docs/SETUP.md) — istruzioni di configurazione per ogni piattaforma e formato, in 31 lingue
 - [docs/PARSING.md](docs/PARSING.md) — leggere una fattura ricevuta: cosa sopravvive e cosa no
 - [docs/CORRECTIONS.md](docs/CORRECTIONS.md) — note di credito, note di debito e resi
+- [docs/DOCUMENTS.md](docs/DOCUMENTS.md) — preventivi, pro forma, DDT, fattura differita, nota di credito dalla fattura
 - [docs/SIGNING.md](docs/SIGNING.md) — firma CAdES, certificati, scadenze, conservazione
 - [CONTRIBUTING.md](CONTRIBUTING.md) — regole di progetto (core senza dipendenze, Decimal, profili paese)
 - [CHANGELOG.md](CHANGELOG.md) — cronologia versioni
@@ -574,7 +602,7 @@ leggono, è supportato a metà. Dettagli in [docs/SETUP.md](docs/SETUP.md).
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 3111 test, ~3 s
+pytest -q          # 3859 test, ~4 s — incluso lo schema XSD ufficiale FatturaPA
 mypy               # pulito, ed è imposto in CI
 ruff check .
 ```

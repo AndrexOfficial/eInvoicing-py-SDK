@@ -13,13 +13,16 @@ add VAT, so :class:`LineItem` carries a net ``unit_price``; use
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from .enums import (
     DocumentType,
+    Freight,
     PaymentMeans,
     TransmissionFormat,
+    TransportBy,
+    TransportReason,
     VatExigibility,
     VatNature,
     WithholdingType,
@@ -33,6 +36,7 @@ __all__ = [
     "WithholdingTax", "SocialSecurityFund", "DocumentReference", "Attachment",
     "BankAccount", "Payment", "Invoice", "DocumentType", "TransmissionFormat",
     "VatNature", "VatExigibility", "PaymentMeans", "WithholdingType",
+    "Carrier", "TransportDetails",
 ]
 
 #: Peppol EAS (Electronic Address Scheme) per paese, usato per derivare
@@ -298,12 +302,96 @@ class SocialSecurityFund:
 
 @dataclass
 class DocumentReference:
-    """Riferimento a ordine / contratto / DDT / fattura collegata."""
+    """Riferimento a ordine / contratto / DDT / fattura collegata.
+
+    ``line_numbers`` are 1-based invoice line numbers the reference applies to
+    (FatturaPA ``RiferimentoNumeroLinea``); empty means "the whole document".
+    For a DDT the date is mandatory in FatturaPA (``DataDDT``).
+    """
 
     kind: str                          # "order" | "contract" | "ddt" | "invoice"
     doc_id: str
     date: date | None = None
     line_numbers: list[int] = field(default_factory=list)
+
+
+@dataclass
+class Carrier:
+    """Il vettore: chi trasporta la merce per conto di altri."""
+
+    name: str
+    vat_number: str | None = None
+    country_code: str = "IT"
+    tax_code: str | None = None
+    address: Address | None = None
+    #: FatturaPA ``NumeroLicenzaGuida`` — the driver's licence number.
+    license_number: str | None = None
+
+
+@dataclass
+class TransportDetails:
+    """Come viaggia la merce.
+
+    The same block serves two documents: the delivery note (DDT), where it is
+    the point of the document, and the *fattura accompagnatoria* — an immediate
+    invoice that travels with the goods instead of a DDT — where it becomes the
+    FatturaPA ``DatiTrasporto``. One shape for both means a DDT converted into an
+    invoice cannot lose the carrier on the way.
+    """
+
+    reason: TransportReason = TransportReason.SALE
+    #: Free text when :attr:`reason` is ``OTHER``, or to qualify it.
+    reason_text: str | None = None
+    by: TransportBy = TransportBy.SENDER
+    carrier: Carrier | None = None
+    #: «Mezzo di trasporto», e.g. a vehicle and its plate.
+    means: str | None = None
+    packages: int | None = None
+    #: «Aspetto esteriore dei beni»: boxes, pallets, loose…
+    goods_appearance: str | None = None
+    gross_weight: Decimal | None = None
+    net_weight: Decimal | None = None
+    weight_unit: str = "kg"
+    #: When the transport starts (data e ora di inizio trasporto).
+    start: datetime | None = None
+    freight: Freight | None = None
+    #: Incoterms code (FatturaPA ``TipoResa``, three capital letters).
+    incoterm: str | None = None
+    #: Where the goods are delivered, when it is not the buyer's address.
+    delivery_address: Address | None = None
+
+    def __post_init__(self) -> None:
+        if self.gross_weight is not None:
+            self.gross_weight = D(self.gross_weight)
+        if self.net_weight is not None:
+            self.net_weight = D(self.net_weight)
+
+    def validate(self) -> None:
+        """What makes the block unusable, whatever the document it is on."""
+        if self.packages is not None and not 1 <= self.packages <= 9999:
+            raise ValidationError(
+                f"Trasporto: numero colli {self.packages} fuori intervallo (1–9999)")
+        for label, weight in (("lordo", self.gross_weight), ("netto", self.net_weight)):
+            if weight is not None and not Decimal("0") < weight < Decimal("10000"):
+                raise ValidationError(
+                    f"Trasporto: peso {label} {weight} fuori intervallo (0–9999,99)")
+        if (self.gross_weight is not None and self.net_weight is not None
+                and self.net_weight > self.gross_weight):
+            raise ValidationError(
+                f"Trasporto: il peso netto ({self.net_weight}) supera il lordo "
+                f"({self.gross_weight})")
+        if self.incoterm is not None and not (
+                len(self.incoterm) == 3 and self.incoterm.isascii()
+                and self.incoterm.isalpha() and self.incoterm.isupper()):
+            raise ValidationError(
+                f"Trasporto: resa '{self.incoterm}' non valida (codice Incoterms di "
+                "tre lettere maiuscole, es. EXW, DAP)")
+        if self.by is TransportBy.CARRIER and self.carrier is None:
+            raise ValidationError(
+                "Trasporto a cura del vettore senza i dati del vettore")
+        if self.reason is TransportReason.OTHER and not (self.reason_text or "").strip():
+            raise ValidationError(
+                "Causale del trasporto 'altro' senza una descrizione")
 
 
 @dataclass
@@ -355,56 +443,25 @@ class VatSummary:
     exemption_reason: str | None = None  # per RiferimentoNormativo / TaxExemptionReason
 
 
-@dataclass
-class Invoice:
-    number: str
-    date: date
-    seller: Party
-    buyer: Party
+class _TotalsMixin:
+    """The arithmetic every priced document shares.
+
+    A quote, a pro forma and the invoice they become are totalled by this one
+    piece of code, on purpose: a quote that says 1,220.00 and turns into an
+    invoice for 1,219.99 is a quote nobody trusts again, and two implementations
+    of the same sum always end up disagreeing by a cent somewhere.
+
+    Only methods live here — the fields are declared by each document, so the
+    dataclasses keep their own field order (``Invoice``'s positional order is
+    public API).
+    """
+
     lines: list[LineItem]
-    document_type: DocumentType = DocumentType.INVOICE
-    currency: str = "EUR"
-    transmission_format: TransmissionFormat = TransmissionFormat.PRIVATE
-    causale: str | None = None
-    payments: list[Payment] = field(default_factory=list)
-    # Routing
-    recipient_code: str | None = None
-    recipient_pec: str | None = None
-    # Optional fiscal blocks (mostly IT; leave empty for other countries)
-    allowances_charges: list[AllowanceCharge] = field(default_factory=list)
-    withholdings: list[WithholdingTax] = field(default_factory=list)
-    references: list[DocumentReference] = field(default_factory=list)
-    attachments: list[Attachment] = field(default_factory=list)
-    stamp_duty: Decimal | None = None   # bollo virtuale (es. 2,00 €)
-    split_payment: bool = False         # scissione dei pagamenti (PA)
-    buyer_reference: str | None = None  # BT-10 (Peppol BuyerReference)
-    exigibility: VatExigibility | None = None  # override EsigibilitaIVA
-    funds: list[SocialSecurityFund] = field(default_factory=list)
-    art73: bool = False                 # documento emesso ex art. 73 DPR 633/72
-    rounding: Decimal | None = None     # Arrotondamento di documento
-    payment_terms_note: str | None = None
-
-    # ── routing / totals ──────────────────────────────────────────────
-
-    def resolved_recipient(self) -> tuple[str, str | None]:
-        """``(CodiceDestinatario, PECDestinatario?)``.
-
-        Fallbacks: "0000000" for IT recipients without an explicit code
-        (B2C / PEC routing), "XXXXXXX" for foreign recipients (SdI
-        convention). PA (FPA12) codes are 6 chars and never padded.
-        """
-        code = self.recipient_code or self.buyer.sdi_code
-        if not code:
-            code = "XXXXXXX" if self.buyer.country_code != "IT" else "0000000"
-        pec = self.recipient_pec or self.buyer.pec
-        return code, (pec if code == "0000000" else None)
-
-    def resolved_exigibility(self) -> str:
-        """``EsigibilitaIVA``: explicit override, else split payment → "S",
-        else immediate."""
-        if self.exigibility is not None:
-            return self.exigibility.value
-        return "S" if self.split_payment else "I"
+    allowances_charges: list[AllowanceCharge]
+    funds: list[SocialSecurityFund]
+    withholdings: list[WithholdingTax]
+    stamp_duty: Decimal | None
+    rounding: Decimal | None
 
     def vat_summary(self) -> list[VatSummary]:
         # Bucket per (aliquota, natura): a pari aliquota 0 nature diverse
@@ -493,6 +550,61 @@ class Invoice:
         """Net amount due = document total minus withholdings."""
         return q2(self.total_document() - self.withholding_total())
 
+
+@dataclass
+class Invoice(_TotalsMixin):
+    number: str
+    date: date
+    seller: Party
+    buyer: Party
+    lines: list[LineItem]
+    document_type: DocumentType = DocumentType.INVOICE
+    currency: str = "EUR"
+    transmission_format: TransmissionFormat = TransmissionFormat.PRIVATE
+    causale: str | None = None
+    payments: list[Payment] = field(default_factory=list)
+    # Routing
+    recipient_code: str | None = None
+    recipient_pec: str | None = None
+    # Optional fiscal blocks (mostly IT; leave empty for other countries)
+    allowances_charges: list[AllowanceCharge] = field(default_factory=list)
+    withholdings: list[WithholdingTax] = field(default_factory=list)
+    references: list[DocumentReference] = field(default_factory=list)
+    attachments: list[Attachment] = field(default_factory=list)
+    stamp_duty: Decimal | None = None   # bollo virtuale (es. 2,00 €)
+    split_payment: bool = False         # scissione dei pagamenti (PA)
+    buyer_reference: str | None = None  # BT-10 (Peppol BuyerReference)
+    exigibility: VatExigibility | None = None  # override EsigibilitaIVA
+    funds: list[SocialSecurityFund] = field(default_factory=list)
+    art73: bool = False                 # documento emesso ex art. 73 DPR 633/72
+    rounding: Decimal | None = None     # Arrotondamento di documento
+    payment_terms_note: str | None = None
+    #: Fattura accompagnatoria: the goods travel with this invoice instead of a
+    #: DDT (FatturaPA ``DatiTrasporto``).
+    transport: TransportDetails | None = None
+
+    # ── routing / totals ──────────────────────────────────────────────
+
+    def resolved_recipient(self) -> tuple[str, str | None]:
+        """``(CodiceDestinatario, PECDestinatario?)``.
+
+        Fallbacks: "0000000" for IT recipients without an explicit code
+        (B2C / PEC routing), "XXXXXXX" for foreign recipients (SdI
+        convention). PA (FPA12) codes are 6 chars and never padded.
+        """
+        code = self.recipient_code or self.buyer.sdi_code
+        if not code:
+            code = "XXXXXXX" if self.buyer.country_code != "IT" else "0000000"
+        pec = self.recipient_pec or self.buyer.pec
+        return code, (pec if code == "0000000" else None)
+
+    def resolved_exigibility(self) -> str:
+        """``EsigibilitaIVA``: explicit override, else split payment → "S",
+        else immediate."""
+        if self.exigibility is not None:
+            return self.exigibility.value
+        return "S" if self.split_payment else "I"
+
     def validate(self) -> None:
         """Core checks + the seller-country profile rules.
 
@@ -512,6 +624,17 @@ class Invoice:
             raise ValidationError("La fattura deve avere almeno una riga")
         if not self.number:
             raise ValidationError("Numero documento mancante")
+        for ref in self.references:
+            for line_no in ref.line_numbers:
+                # A reference to a line that does not exist is not a style
+                # problem: the receiver matches the DDT to lines by number, and
+                # a number past the end matches nothing.
+                if not 1 <= line_no <= len(self.lines):
+                    raise ValidationError(
+                        f"Riferimento {ref.kind} '{ref.doc_id}': la riga {line_no} non "
+                        f"esiste (il documento ha {len(self.lines)} righe)")
+        if self.transport is not None:
+            self.transport.validate()
         profile_for(self.seller.country_code).validate_invoice(self)
 
     def check(self) -> list[Advisory]:
@@ -586,7 +709,55 @@ class Invoice:
             ))
 
         out.extend(self._correction_advisories())
+        out.extend(self._deferred_advisories())
         out.extend(self._category_advisories(seller_country))
+        return out
+
+    def _deferred_advisories(self) -> list[Advisory]:
+        """Findings for a deferred invoice (TD24/TD25) built on delivery notes.
+
+        Art. 21 c.4 lett. a) DPR 633/72: the deliveries of one calendar month to
+        one customer, each documented by a DDT, may be billed with ONE invoice
+        issued by the 15th of the following month. Both halves of that sentence
+        go wrong in practice — DDTs of two months folded into one invoice, and
+        an invoice dated after the deadline — and SdI checks neither, so the
+        first to notice is an audit.
+
+        Only DDT references with a date count: without the date there is
+        nothing to measure (and FatturaPA refuses the reference anyway).
+        """
+        if self.document_type not in (DocumentType.DEFERRED_INVOICE,
+                                      DocumentType.DEFERRED_INVOICE_TRIANGULAR):
+            return []
+        dated = sorted(r.date for r in self.references if r.kind == "ddt" and r.date)
+        if not dated:
+            return []
+        out: list[Advisory] = []
+        months = sorted({(d.year, d.month) for d in dated})
+        if len(months) > 1:
+            listed = ", ".join(f"{m:02d}/{y}" for y, m in months)
+            out.append(Advisory(
+                "deferred_mixed_months",
+                f"Fattura differita che raggruppa DDT di mesi diversi ({listed}): "
+                "l'art. 21 c.4 lett. a DPR 633/72 consente una sola fattura per le "
+                "consegne dello stesso mese solare. Emetterne una per mese.",
+            ))
+        year, month = months[0]
+        deadline = date(year + 1, 1, 15) if month == 12 else date(year, month + 1, 15)
+        if self.date > deadline:
+            out.append(Advisory(
+                "deferred_late",
+                f"Fattura differita datata {self.date:%d/%m/%Y}: per le consegne di "
+                f"{month:02d}/{year} il termine di emissione era il "
+                f"{deadline:%d/%m/%Y} (art. 21 c.4 lett. a DPR 633/72).",
+            ))
+        if self.date < dated[-1]:
+            out.append(Advisory(
+                "deferred_before_delivery",
+                f"Fattura differita datata {self.date:%d/%m/%Y}, prima del DDT del "
+                f"{dated[-1]:%d/%m/%Y}: una fattura differita segue le consegne che "
+                "documenta, non le precede.",
+            ))
         return out
 
     def _category_advisories(self, seller_country: str) -> list[Advisory]:

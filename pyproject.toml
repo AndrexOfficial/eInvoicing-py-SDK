@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "einvoice"
-version = "0.9.0"
+version = "0.10.0"
 description = "Standalone, reusable e-invoicing engine for the EU-27, the UK, Switzerland and the US: EN 16931 in both syntaxes (UBL Peppol BIS 3.0 and UN/CEFACT CII for Factur-X / ZUGFeRD / Chorus Pro) plus FatturaPA/SdI, national CIUS selection (XRechnung, NLCIUS, CIUS-RO), 30 country profiles with check-digit tax-id validation and e-invoicing regime data, CAdES (.p7m) signing, conservation export, and presets for 25 platforms (Fiscozen, Storecove, Aruba, FattureInCloud, Chorus Pro, …)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -47,7 +47,11 @@ dev = ["httpx>=0.24", "cryptography>=50.0.0", "pytest>=9.1.1", "ruff>=0.16.4", "
        # Solo per il test che prova che print_receipt guida davvero
        # l'interfaccia di python-escpos (il loro Dummy raccoglie i byte).
        # Il core resta senza dipendenze: il modulo non la importa mai.
-       "python-escpos>=3.1", "reportlab>=4"]
+       "python-escpos>=3.1", "reportlab>=4",
+       # Solo per validare l'XML prodotto contro l'XSD ufficiale FatturaPA
+       # (tests/schemas/): un renderer provato solo contro il proprio parser
+       # scriveva DatiDDT nella forma sbagliata e nessun test se ne accorgeva.
+       "lxml>=6.1"]
 
 [project.scripts]
 einvoice = "einvoice.cli:main"

@@ -85,14 +85,32 @@ from .devices import (
     programmable_terminals,
     terminals_for_country,
 )
+from .documents import (
+    DeliveryLine,
+    DeliveryNote,
+    ProForma,
+    Quote,
+    can_transition,
+    credit_note_for,
+    deferred_invoice,
+    document_kind,
+    initial_status,
+    next_statuses,
+    transition,
+)
 from .engine import EInvoiceEngine, EngineResult
 from .enums import (
     REGIMI_FISCALI,
+    DocumentKind,
+    DocumentStatus,
     DocumentType,
+    Freight,
     InvoiceState,
     NotificationType,
     PaymentMeans,
     TransmissionFormat,
+    TransportBy,
+    TransportReason,
     VatExigibility,
     VatNature,
     WithholdingType,
@@ -140,12 +158,14 @@ from .models import (
     AllowanceCharge,
     Attachment,
     BankAccount,
+    Carrier,
     DocumentReference,
     Invoice,
     LineItem,
     Party,
     Payment,
     SocialSecurityFund,
+    TransportDetails,
     VatSummary,
     WithholdingTax,
 )
@@ -180,10 +200,14 @@ from .pdf import (
     PdfBranding,
     PdfFontUnavailable,
     PdfUnavailable,
+    delivery_note_pdf,
+    document_pdf,
     font_for_text,
     invoice_pdf,
     locales_without_font,
     needs_unicode_font,
+    proforma_pdf,
+    quote_pdf,
     receipt_pdf,
     system_unicode_font,
 )
@@ -240,6 +264,10 @@ from .reference import (
     renderer_reference,
 )
 from .serde import (
+    document_from_dict,
+    document_from_json,
+    document_to_dict,
+    document_to_json,
     invoice_from_dict,
     invoice_from_json,
     invoice_to_dict,
@@ -276,7 +304,7 @@ from .transport import (
     transport_for_provider,
 )
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 __all__ = [
     "business_types",
@@ -289,6 +317,14 @@ __all__ = [
     "Invoice", "Party", "Address", "LineItem", "Payment", "VatSummary", "Advisory",
     "AllowanceCharge", "WithholdingTax", "SocialSecurityFund",
     "DocumentReference", "Attachment", "BankAccount", "PEPPOL_EAS_BY_COUNTRY",
+    "Carrier", "TransportDetails",
+    # i documenti intorno alla fattura: preventivo, pro forma, DDT
+    "Quote", "ProForma", "DeliveryNote", "DeliveryLine", "deferred_invoice",
+    "credit_note_for", "initial_status", "can_transition", "next_statuses",
+    "transition", "document_kind", "DocumentKind", "DocumentStatus",
+    "TransportBy", "TransportReason", "Freight",
+    "quote_pdf", "proforma_pdf", "delivery_note_pdf", "document_pdf",
+    "document_to_dict", "document_from_dict", "document_to_json", "document_from_json",
     # countries
     "CountryProfile", "EInvoicingRegime", "FiscalRules", "EU_OSS_THRESHOLD",
     "COUNTRY_PROFILES", "EU_COUNTRIES",

@@ -151,9 +151,24 @@ def test_the_simplified_debit_note_stays_on_the_invoice_root():
     DocumentType.SIMPLIFIED_DEBIT_NOTE,
 ])
 def test_fatturapa_preserves_the_simplified_code(doc_type):
+    """Read side: a file carrying TD07–TD09 keeps its code.
+
+    Write side is the opposite since 0.10.0: the ORDINARY schema (FPR12) does
+    not list these types — they belong to the simplified format, FSM10 — so
+    the renderer refuses them instead of writing a file SdI rejects on format.
+    The read guarantee is tested on a document of the ordinary shape whose
+    TipoDocumento says TD0x, which is what arrives from senders who mix the two.
+    """
+    from einvoice.errors import RenderError
+
     note = _doc(document_type=doc_type, references=CREDITED)
-    restored = parse_invoice(_rendered(note, "fatturapa"))
-    assert restored.document_type is doc_type
+    with pytest.raises(RenderError, match="semplificata"):
+        _rendered(note, "fatturapa")
+    ordinary = _rendered(_doc(document_type=DocumentType.CREDIT_NOTE, references=CREDITED),
+                         "fatturapa")
+    xml = ordinary.replace(b"<TipoDocumento>TD04</TipoDocumento>",
+                           f"<TipoDocumento>{doc_type.value}</TipoDocumento>".encode())
+    assert parse_invoice(xml).document_type is doc_type
 
 
 @pytest.mark.parametrize(("doc_type", "narrowed_to"), [
@@ -257,7 +272,14 @@ def test_a_netted_return_round_trips(standard):
 
     assert restored.total_document() == netted.total_document()
     assert len(restored.lines) == 2
-    assert restored.lines[1].quantity == Decimal("-2")
+    assert restored.lines[1].total == Decimal("-200.00")
+    if standard == "fatturapa":
+        # QuantitaType has no sign: the return travels as a positive quantity
+        # at a negative price — the same amount in the only shape SdI accepts.
+        assert restored.lines[1].quantity == Decimal("2")
+        assert restored.lines[1].unit_price == Decimal("-100")
+    else:
+        assert restored.lines[1].quantity == Decimal("-2")
 
 
 def test_a_full_return_nets_an_invoice_to_zero():

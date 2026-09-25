@@ -79,11 +79,29 @@ sempre nell'ordine della sequence XSD):
 - **Art73 = "SI"** ← `Invoice.art73`
 - **CodiceArticolo** ← `LineItem.article_code` (+ `article_code_type`, default `INTERNO`)
 - **DataInizioPeriodo / DataFinePeriodo** ← `LineItem.period_start` / `period_end`
-- **ScontoMaggiorazione di linea** ← `LineItem.discounts` (`PrezzoTotale` è già
-  al netto degli sconti riga)
+- **ScontoMaggiorazione di linea** ← `LineItem.discounts`. Attenzione: nel
+  modello lo sconto di riga è un importo **sul totale della riga** (come in
+  EN 16931), in FatturaPA è **per unità** — SdI ricalcola
+  `PrezzoTotale = (PrezzoUnitario − ΣSconti + ΣMaggiorazioni) × Quantita`
+  (controllo **00423**, tolleranza 1 centesimo). Il renderer divide per la
+  quantità (fino a 8 decimali) e rifà il calcolo di SdI sui valori scritti
+  prima di restituire il file: se non torna solleva `RenderError` invece di
+  produrre uno scarto. Prima della 0.10.0 lo sconto veniva scritto come totale
+  di riga: con quantità diversa da 1 il file era scartato.
 - **RiferimentoNormativo** nei `DatiRiepilogo` con Natura ← `LineItem.exemption_reason`
   della prima riga del bucket, fallback `nature.default_exemption_reason`
-- **DatiOrdineAcquisto / DatiContratto / DatiDDT / DatiFattureCollegate** ← `Invoice.references`
+- **DatiOrdineAcquisto / DatiContratto / DatiFattureCollegate / DatiDDT** ←
+  `Invoice.references`, sempre nell'ordine della sequence XSD qualunque sia
+  l'ordine del chiamante (prima della 0.10.0 lo seguiva, e una nota di credito
+  con fattura collegata e ordine era scartata). `DatiDDT` ha una forma sua:
+  `NumeroDDT`, `DataDDT` (**obbligatoria**), poi le `RiferimentoNumeroLinea`
+  — non `IdDocumento`/`Data` come gli altri riferimenti, che è come lo scriveva
+  il pacchetto prima della 0.10.0. Il parser rilegge anche quella forma vecchia.
+- **DatiTrasporto** ← `Invoice.transport` (`TransportDetails`): la *fattura
+  accompagnatoria*. Vettore (solo se ha P.IVA: `IdFiscaleIVA` è obbligatorio nel
+  blocco), mezzo, causale nella lingua del cedente, colli, aspetto, pesi, data e
+  ora del ritiro/inizio trasporto, resa Incoterms, indirizzo di resa. Vedi
+  [DOCUMENTS.md](DOCUMENTS.md).
 - **Allegati** ← `Invoice.attachments` (con `FormatoAttachment` dall'estensione
   e `DescrizioneAttachment`)
 - **EsigibilitaIVA** ← `Invoice.exigibility` / `Invoice.split_payment`
@@ -95,7 +113,41 @@ automatico quando `buyer.country_code != "IT"` senza codice esplicito; `CAP =
 dall'Italia. Per la PA (`FPA12`) il codice destinatario è di 6 caratteri e
 `validate()` ne verifica la lunghezza (7 per `FPR12`).
 
-Non ancora coperto (estendibile): **Fattura semplificata** (schema diverso).
+## Quello che lo schema e SdI pretendono (0.10.0)
+
+Il renderer è validato in test contro lo **schema ufficiale 1.2.3**
+(`tests/schemas/fatturapa`, specifiche tecniche 1.9) su una matrice di fatture:
+ogni tipo documento, ogni natura IVA, riferimenti in ogni ordine, DDT multipli,
+trasporto, PA, estero, resi, sconti, testi tipografici. Le regole che ne sono
+uscite:
+
+- **Testo solo Latin-1** (`String…LatinType`; alcuni campi solo ASCII). Tutti i
+  campi di testo passano da `einvoice.formats.latin.to_latin`: la tipografia si
+  riscrive (’ → ', – → -, … → ..., € → EUR), le lettere si piegano quando si
+  può (ł → l, ș → s, ő → o), le decorazioni cadono (emoji), e le lettere senza
+  grafia latina (cirillico, greco, CJK, thai) **fermano** il documento con un
+  errore che nomina campo e caratteri — mai punti interrogativi. Lunghezze
+  massime per campo, misurate dopo la riscrittura.
+- **Causale** oltre 200 caratteri → più elementi `Causale` (lo schema li ammette
+  0..N), spezzati sugli spazi; il parser li ricongiunge.
+- **Quantità mai negative** (`QuantitaType` non ha segno): un reso su riga
+  negativa esce come quantità positiva a prezzo negativo — stesso importo.
+  Quantità fino a 8 decimali: 1,125 kg non diventa più «1.13».
+- **IBAN e BIC** senza spazi e in maiuscolo; **codice fiscale** in maiuscolo;
+  **IscrizioneREA** letta come «PR-NUMERO» (l'Ufficio deve essere la sigla della
+  provincia: un REA illeggibile è un errore, non un file invalido).
+- **Beneficiario** è il **primo** elemento di `DettaglioPagamento` (prima della
+  0.10.0 era scritto dopo l'importo, dove lo schema lo rifiuta).
+- **Partita IVA** scritta normalizzata (senza prefisso paese né spazi).
+
+Controlli di contenuto SdI riprodotti in `validate()` (profilo IT), con il loro
+codice: **00425** numero senza cifre (e al massimo 20 caratteri ASCII),
+**00418** documento anteriore alla fattura collegata, **00471** cedente uguale
+al cessionario per TD01/02/03/06/16–20/24/25/28, DDT senza data.
+
+Non coperto: **fattura semplificata** (TD07–TD09, schema FSM10). Il renderer
+ordinario la **rifiuta** con `RenderError`: prima scriveva un tipo che il
+tracciato FPR12 non ammette.
 
 ## Firma e trasmissione
 

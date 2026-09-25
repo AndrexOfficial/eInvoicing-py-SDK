@@ -36,6 +36,8 @@ from xml.etree import ElementTree as ET
 from .enums import (
     DocumentType,
     PaymentMeans,
+    TransportBy,
+    TransportReason,
     VatExigibility,
     VatNature,
     WithholdingType,
@@ -46,12 +48,14 @@ from .models import (
     AllowanceCharge,
     Attachment,
     BankAccount,
+    Carrier,
     DocumentReference,
     Invoice,
     LineItem,
     Party,
     Payment,
     SocialSecurityFund,
+    TransportDetails,
     WithholdingTax,
 )
 from .money import D, q2, q6
@@ -705,11 +709,7 @@ def _parse_fattura_body(root, body) -> Invoice:
             period_start=_iso_date(_text(el, "DataInizioPeriodo", {})),
             period_end=_iso_date(_text(el, "DataFinePeriodo", {})),
         )
-        for sm in el.findall("ScontoMaggiorazione"):
-            line.discounts.append(AllowanceCharge(
-                amount=_dec(_text(sm, "Importo", {})),
-                is_charge=_text(sm, "Tipo", {}) == "MG",
-            ))
+        line.discounts = _fpa_line_discounts(el, line)
         lines.append(line)
 
     payments: list[Payment] = []
@@ -731,13 +731,23 @@ def _parse_fattura_body(root, body) -> Invoice:
 
     references: list[DocumentReference] = []
     for kind, tag in (("order", "DatiOrdineAcquisto"), ("contract", "DatiContratto"),
-                      ("ddt", "DatiDDT"), ("invoice", "DatiFattureCollegate")):
+                      ("invoice", "DatiFattureCollegate"), ("ddt", "DatiDDT")):
         for ref in body.findall(f"DatiGenerali/{tag}"):
-            doc_id = _text(ref, "IdDocumento", {}) or _text(ref, "NumeroDDT", {})
+            if kind == "ddt":
+                # NumeroDDT/DataDDT is the schema; IdDocumento/Data is how this
+                # package itself wrote DDTs before 0.10.0, and files of that
+                # shape exist in archives.
+                doc_id = _text(ref, "NumeroDDT", {}) or _text(ref, "IdDocumento", {})
+                when = _text(ref, "DataDDT", {}) or _text(ref, "Data", {})
+            else:
+                doc_id = _text(ref, "IdDocumento", {})
+                when = _text(ref, "Data", {})
             if doc_id:
-                references.append(DocumentReference(
-                    kind, doc_id,
-                    _iso_date(_text(ref, "Data", {}) or _text(ref, "DataDDT", {}))))
+                # The line numbers were written and never read back: a DDT
+                # covering lines 1–3 came back covering the whole invoice.
+                lines_ref = [int(n.text) for n in ref.findall("RiferimentoNumeroLinea")
+                             if n.text and n.text.strip().isdigit()]
+                references.append(DocumentReference(kind, doc_id, _iso_date(when), lines_ref))
 
     # ── the Italian blocks the other two syntaxes cannot carry ──────────
     withholdings = [
@@ -761,13 +771,23 @@ def _parse_fattura_body(root, body) -> Invoice:
         )
         for f in general.findall("DatiCassaPrevidenziale")
     ]
-    allowances = [
-        AllowanceCharge(
-            amount=_dec(_text(sm, "Importo", {})),
-            is_charge=_text(sm, "Tipo", {}) == "MG",
-        )
-        for sm in general.findall("ScontoMaggiorazione")
-    ]
+    # A document discount may be written as a percentage only. Its base is not
+    # spelled out by the specification; the goods and the fund contribution —
+    # what the discount can apply to — is the reading that re-adds up, and if
+    # the sender meant something else compare_declared_totals shows the gap.
+    # Reading only Importo made every such discount zero.
+    goods = sum((ln.total for ln in lines), Decimal("0")) + sum(
+        (_dec(_text(f, "ImportoContributoCassa", {})) for f in general.findall("DatiCassaPrevidenziale")),
+        Decimal("0"))
+    allowances = []
+    for sm in general.findall("ScontoMaggiorazione"):
+        amount = _opt_dec(_text(sm, "Importo", {}))
+        percent = _opt_dec(_text(sm, "Percentuale", {}))
+        if amount is None and percent is not None:
+            amount = q2(goods * percent / Decimal("100"))
+        if amount is None:
+            continue
+        allowances.append(AllowanceCharge(amount=amount, is_charge=_text(sm, "Tipo", {}) == "MG"))
     attachments = []
     for att in body.findall("Allegati"):
         payload = _text(att, "Attachment", {})
@@ -790,7 +810,10 @@ def _parse_fattura_body(root, body) -> Invoice:
         lines=lines,
         document_type=DocumentType(doc_type) if doc_type else DocumentType.INVOICE,
         currency=_text(general, "Divisa", {}) or "EUR",
-        causale=_text(general, "Causale", {}),
+        # Causale is 0..N elements of 200 characters: a long one arrives split,
+        # and reading only the first cut it off at the 200th character.
+        causale=" ".join(c.text.strip() for c in general.findall("Causale")
+                         if c.text and c.text.strip()) or None,
         payments=payments,
         references=references,
         buyer_reference=_text(header, "CessionarioCommittente/"
@@ -805,9 +828,106 @@ def _parse_fattura_body(root, body) -> Invoice:
         attachments=attachments,
         art73=_text(general, "Art73", {}) == "SI",
         exigibility=_fpa_exigibility(body),
+        transport=_fpa_transport(body.find("DatiGenerali/DatiTrasporto")),
     )
     _attribute_document_allowances(invoice, body)
     return invoice
+
+
+def _fpa_line_discounts(el: ET.Element, line: LineItem) -> list[AllowanceCharge]:
+    """The line's ``ScontoMaggiorazione`` as model discounts.
+
+    In FatturaPA a line discount is **per unit**: SdI checks
+    ``PrezzoTotale = (PrezzoUnitario − ΣSconti + ΣMaggiorazioni) × Quantita``
+    (00423). The model's line discount is a line-total amount, as in EN 16931,
+    so the per-unit value is multiplied back by the quantity. A discount may
+    also be a ``Percentuale`` instead of an ``Importo``: SdI applies those in
+    cascade, each on the unit price left by the previous one, and when both are
+    present the ``Importo`` is the one that counts. Reading only ``Importo``
+    turned every percentage discount of an incoming invoice into zero — and,
+    since totals are recomputed from the lines, overstated what was owed.
+    """
+    out: list[AllowanceCharge] = []
+    running = line.unit_price
+    for sm in el.findall("ScontoMaggiorazione"):
+        is_charge = _text(sm, "Tipo", {}) == "MG"
+        amount = _opt_dec(_text(sm, "Importo", {}))
+        percent = _opt_dec(_text(sm, "Percentuale", {}))
+        if amount is not None:
+            per_unit = amount
+        elif percent is not None:
+            per_unit = running * percent / Decimal("100")
+        else:
+            continue
+        running = running + per_unit if is_charge else running - per_unit
+        out.append(AllowanceCharge(amount=q2(per_unit * line.quantity), is_charge=is_charge))
+    return out
+
+
+def _fpa_transport(el: ET.Element | None) -> TransportDetails | None:
+    """``DatiTrasporto`` → :class:`TransportDetails`.
+
+    Two fields have no home in FatturaPA and cannot come back: *who* transports
+    (mittente/destinatario) when there is no carrier block, and the freight
+    terms (porto franco/assegnato). Both are declared losses.
+    """
+    if el is None:
+        return None
+    from .i18n import translate
+
+    carrier = None
+    dav = el.find("DatiAnagraficiVettore")
+    if dav is not None:
+        name = _text(dav, "Anagrafica/Denominazione", {}) or " ".join(
+            p for p in (_text(dav, "Anagrafica/Nome", {}), _text(dav, "Anagrafica/Cognome", {})) if p)
+        carrier = Carrier(
+            name=name or "—",
+            vat_number=_text(dav, "IdFiscaleIVA/IdCodice", {}),
+            country_code=_text(dav, "IdFiscaleIVA/IdPaese", {}) or "IT",
+            tax_code=_text(dav, "CodiceFiscale", {}),
+            license_number=_text(dav, "NumeroLicenzaGuida", {}),
+        )
+    reason, reason_text = TransportReason.OTHER, _text(el, "CausaleTrasporto", {})
+    if reason_text:
+        head, _, tail = reason_text.partition(":")
+        for candidate in TransportReason:
+            if candidate is not TransportReason.OTHER and head.strip().casefold() == \
+                    translate(f"transport_reason.{candidate.value}", "it").casefold():
+                reason, reason_text = candidate, (tail.strip() or None)
+                break
+    start = None
+    pickup = _text(el, "DataOraRitiro", {})
+    if pickup:
+        try:
+            start = datetime.fromisoformat(pickup)
+        except ValueError:
+            start = None
+    if start is None:
+        day = _iso_date(_text(el, "DataInizioTrasporto", {}))
+        start = datetime(day.year, day.month, day.day) if day else None
+    resa = el.find("IndirizzoResa")
+    packages = _text(el, "NumeroColli", {})
+    return TransportDetails(
+        reason=reason,
+        reason_text=reason_text,
+        by=TransportBy.CARRIER if carrier is not None else TransportBy.SENDER,
+        carrier=carrier,
+        means=_text(el, "MezzoTrasporto", {}),
+        packages=int(packages) if packages and packages.strip().isdigit() else None,
+        goods_appearance=_text(el, "Descrizione", {}),
+        gross_weight=_opt_dec(_text(el, "PesoLordo", {})),
+        net_weight=_opt_dec(_text(el, "PesoNetto", {})),
+        weight_unit=_text(el, "UnitaMisuraPeso", {}) or "kg",
+        start=start,
+        incoterm=_text(el, "TipoResa", {}),
+        delivery_address=Address(
+            street=_text(resa, "Indirizzo", {}) or "—",
+            postcode=_text(resa, "CAP", {}) or "00000",
+            city=_text(resa, "Comune", {}) or "—",
+            province=_text(resa, "Provincia", {}),
+            country=_text(resa, "Nazione", {}) or "IT",
+        ) if resa is not None else None,
+    )
 
 
 def _attribute_document_allowances(invoice: Invoice, body: ET.Element) -> None:

@@ -194,3 +194,14 @@ DocumentType.CREDIT_NOTE.corrects_an_earlier_document  # True
 DocumentType.INVOICE.corrects_an_earlier_document      # False
 DocumentType.SIMPLIFIED_CREDIT_NOTE.uncl1001         # "381"
 ```
+
+## Costruire la nota di credito dalla fattura (0.10.0)
+
+`credit_note_for(invoice, number=…, date=…)` costruisce la TD04 dalla fattura
+stessa: intera (righe, sconti, cassa e ritenuta specchiati), **per righe**
+(`lines={indice: quantità}`, la merce tornata) o **per importo**
+(`amount=…`, ripartito sulle aliquote della fattura in proporzione, al
+centesimo). Cita la fattura, non può esserle anteriore (00418), non storna una
+nota di credito, e rifiuta lo storno parziale per importo di una fattura con
+ritenuta o cassa, dove l'importo da solo non dice come ripartirle. Dettagli in
+[DOCUMENTS.md](DOCUMENTS.md#la-nota-di-credito).

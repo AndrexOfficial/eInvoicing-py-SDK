@@ -36,7 +36,7 @@ from xml.etree import ElementTree as ET
 from ..models import Invoice, Party, VatNature
 from ..money import D, fmt2, fmt_price, q2
 from ..naming import safe_filename
-from .base import InvoiceRenderer, RenderedDocument
+from .base import InvoiceRenderer, RenderedDocument, first_reference, require_invoice
 
 RSM = "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
 RAM = "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
@@ -175,6 +175,7 @@ def _allowance_charge(parent: ET.Element, *, is_charge: bool, amount,
 def build_cii_xml(invoice: Invoice, *, guideline: str = _DEFAULT_GUIDELINE,
                   tax_scheme: str = "VAT") -> bytes:
     """Render an :class:`~einvoice.models.Invoice` as EN 16931 CII (D16B)."""
+    require_invoice(invoice, "CII")
     invoice.validate()
     cur = invoice.currency
     summary = invoice.vat_summary()
@@ -247,9 +248,10 @@ def build_cii_xml(invoice: Invoice, *, guideline: str = _DEFAULT_GUIDELINE,
     if order_ref is not None:
         _e(_e(agreement, "ram:BuyerOrderReferencedDocument"),
            "ram:IssuerAssignedID", order_ref.doc_id)
-    for ref in (r for r in invoice.references if r.kind == "contract"):
+    contract = first_reference(invoice, "contract")        # BT-12, 0..1
+    if contract is not None:
         _e(_e(agreement, "ram:ContractReferencedDocument"),
-           "ram:IssuerAssignedID", ref.doc_id)
+           "ram:IssuerAssignedID", contract.doc_id)
     for att in invoice.attachments:
         adr = _e(agreement, "ram:AdditionalReferencedDocument")
         _e(adr, "ram:IssuerAssignedID", att.filename)
@@ -264,9 +266,10 @@ def build_cii_xml(invoice: Invoice, *, guideline: str = _DEFAULT_GUIDELINE,
 
     # ── delivery ────────────────────────────────────────────────────────
     delivery = _e(txn, "ram:ApplicableHeaderTradeDelivery")
-    for ref in (r for r in invoice.references if r.kind == "ddt"):
+    despatch = first_reference(invoice, "ddt")             # BT-16, 0..1
+    if despatch is not None:
         dd = _e(delivery, "ram:DespatchAdviceReferencedDocument")
-        _e(dd, "ram:IssuerAssignedID", ref.doc_id)
+        _e(dd, "ram:IssuerAssignedID", despatch.doc_id)
 
     # ── settlement: money ───────────────────────────────────────────────
     stl = _e(txn, "ram:ApplicableHeaderTradeSettlement")

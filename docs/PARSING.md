@@ -85,6 +85,9 @@ riga e di documento, i mezzi di pagamento con IBAN e scadenza, i riferimenti
 | `article_code_type` | ✅ `CodiceTipo` | ❌ | ❌ |
 | Tipo documento «semplificato» | ✅ `TD07/08/09` | ⚠️ → `TD01/04/05` | ⚠️ → `TD01/04/05` |
 | Aliquota di uno sconto/onere **di documento** | ❌ vedi sotto | ✅ | ✅ |
+| Dati di trasporto (`transport`) | ✅ `DatiTrasporto`, tranne «a cura di» senza vettore e il porto | ❌ non mappati | ❌ non mappati |
+| Più DDT o contratti citati | ✅ tutti | ⚠️ solo il primo (BT-16/BT-12 sono 0..1) | ⚠️ solo il primo |
+| Righe coperte da un riferimento (`line_numbers`) | ✅ `RiferimentoNumeroLinea` | ❌ | ❌ |
 
 **FatturaPA è lossless, con una sola eccezione.** C'è un test che confronta
 *ogni* campo del modello dopo il giro e pretende zero differenze. Prima non lo
@@ -116,6 +119,21 @@ Lo stesso vale per il **tipo documento**: UNCL 1001 ha tre codici dove l'Italia
 ne ha nove, quindi `TD08` (nota di credito semplificata) torna come `TD04`. Ciò
 che sopravvive sempre è il **verso** — una nota di credito torna una nota di
 credito, mai una fattura. Vedi [CORRECTIONS.md](CORRECTIONS.md).
+
+**Sconti in percentuale e per unità (0.10.0).** In FatturaPA lo sconto di
+riga è *per unità* e può essere un `Importo` o una `Percentuale`, applicate a
+cascata sul prezzo unitario come fa SdI (con entrambi presenti vale l'importo).
+Il parser le riporta al modello — sconto sul totale della riga, come EN 16931 —
+moltiplicando per la quantità. Prima leggeva solo `Importo`, e come totale di
+riga: ogni sconto percentuale di una fattura ricevuta valeva zero, e visto che i
+totali si ricalcolano dalle righe, il debito risultava più alto del dovuto.
+Anche lo sconto di **documento** espresso solo in percentuale ora vale qualcosa:
+la base è il totale di righe e cassa, e se il fornitore intendeva altro
+`compare_declared_totals` mostra la differenza.
+
+**Riferimenti.** I `DatiDDT` scritti dalle versioni precedenti del pacchetto
+(`IdDocumento`/`Data` invece di `NumeroDDT`/`DataDDT`) si rileggono ancora; i
+numeri di riga dei riferimenti tornano; più elementi `Causale` si ricongiungono.
 
 Corollario pratico: se emetti verso SdI e ti serve un round-trip fedele, il
 formato di riferimento è FatturaPA. Se ricevi da un fornitore estero, quello che

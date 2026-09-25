@@ -224,7 +224,8 @@ def test_every_public_module_is_reachable_from_the_package_root():
     import einvoice
 
     mancanti: list[str] = []
-    for nome in ("pos", "receipt", "pdf", "devices", "i18n", "onboarding", "reference"):
+    for nome in ("pos", "receipt", "pdf", "devices", "i18n", "onboarding", "reference",
+                 "documents", "serde"):
         modulo = importlib.import_module(f"einvoice.{nome}")
         for pubblico in getattr(modulo, "__all__", []):
             if pubblico.startswith("_"):

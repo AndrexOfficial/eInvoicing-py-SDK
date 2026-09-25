@@ -229,12 +229,15 @@ def _invoice(category, rate, country="IT"):
     from einvoice import Address, Invoice, LineItem, Party
 
     vat = {"IT": "07643520567", "DE": "136695976"}[country]
+    # The buyer is a different taxpayer: SdI refuses a TD01 whose buyer is its
+    # own seller (00471).
+    buyer_vat = {"IT": "09876543217", "DE": "136695976"}[country]
     return Invoice(
         number="R-1", date=date(2026, 8, 24),
         seller=Party(name="S", vat_number=vat, country_code=country,
                      address=Address("Via Roma 1", "20100", "Milano", "MI",
                                      country)),
-        buyer=Party(name="B", vat_number=vat, country_code=country,
+        buyer=Party(name="B", vat_number=buyer_vat, country_code=country,
                     sdi_code="ABCDEFG",
                     address=Address("Via Verdi 9", "00100", "Roma", "RM", country)),
         lines=[LineItem("X", Decimal("1"), Decimal("100"), Decimal(rate),
